@@ -1,0 +1,64 @@
+name: CI/CD Pipeline & Automated Deployment
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-and-lint:
+    name: Build & Verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Seed Database & Verify Integrity
+        run: |
+          node src/seed.js
+
+      - name: Validate Health Endpoint Simulation
+        run: |
+          node -e "
+            const { queryOne } = require('./src/db');
+            const res = queryOne('SELECT COUNT(*) as count FROM products');
+            if (!res || res.count === 0) {
+              console.error('Validation failed: No products in DB');
+              process.exit(1);
+            }
+            console.log('Database integrity check passed with ' + res.count + ' products.');
+          "
+
+      - name: Build Docker Image
+        run: |
+          docker build -t ecommerce-platform:test -f docker/Dockerfile .
+
+  deploy:
+    name: Deploy to Cloud Instance (AWS / OCI)
+    needs: test-and-lint
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH to Cloud Host
+        if: ${{ env.SERVER_HOST != '' }}
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo "Deploying to cloud server: $SERVER_HOST..."
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_HOST" "cd /opt/ecommerce_website && git pull && ./deploy/deploy.sh"

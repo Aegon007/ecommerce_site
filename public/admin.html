@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Store Management Center | Apex Goods Co.</title>
+  <link rel="stylesheet" href="/css/styles.css?v=warm_2" />
+  <style>
+    .admin-nav {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 2rem;
+      padding-bottom: 0.5rem;
+      overflow-x: auto;
+    }
+    .admin-tab-btn {
+      padding: 0.65rem 1.25rem;
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      border-radius: var(--radius-md);
+      transition: var(--transition);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .admin-tab-btn:hover {
+      color: var(--text-main);
+      background: var(--bg-secondary);
+    }
+    .admin-tab-btn.active {
+      color: #fff;
+      background: var(--primary);
+      box-shadow: 0 4px 12px var(--primary-glow);
+    }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    .metric-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-md);
+    }
+    .metric-card-title {
+      font-size: 0.8rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+    .metric-card-val {
+      font-size: 2.1rem;
+      font-weight: 900;
+      color: var(--text-main);
+    }
+    .admin-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    .admin-table th, .admin-table td {
+      padding: 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .admin-table th {
+      color: var(--text-muted);
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.5px;
+      background: #fbf9f5;
+    }
+    .catalog-filter-btn {
+      padding: 0.4rem 0.85rem;
+      border-radius: var(--radius-full);
+      font-size: 0.825rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      border: 1px solid var(--border-color);
+      background: var(--bg-surface);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .catalog-filter-btn.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="navbar">
+    <div class="container nav-container">
+      <div style="display: flex; align-items: center; gap: 1rem;">
+        <a href="/" class="nav-brand">
+          <div class="nav-brand-icon">A</div>
+          <span>APEX GOODS</span>
+        </a>
+        <span style="background: var(--primary-light); color: var(--primary); padding: 0.25rem 0.75rem; border-radius: var(--radius-full); font-size: 0.75rem; font-weight: 800; border: 1px solid rgba(217, 83, 40, 0.3);">
+          STORE MANAGER
+        </span>
+      </div>
+
+      <div class="nav-links" style="margin-left: auto;">
+        <a href="/" class="nav-link-btn">← Public Storefront</a>
+        <button id="nav-logout-btn" class="nav-link-btn" style="display: none; color: var(--danger); font-weight: 700;" onclick="handleLogout()">
+          🔒 Log Out
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 1. AUTHENTICATION LOGIN VIEW (SHOWN WHEN LOCKED) -->
+  <div id="admin-login-view" class="container" style="display: flex; align-items: center; justify-content: center; min-height: 70vh; padding: 3rem 1.5rem;">
+    <div class="card" style="max-width: 440px; width: 100%; text-align: center; padding: 2.75rem 2rem;">
+      <div style="width: 68px; height: 68px; background: var(--primary-light); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 1.5rem; color: var(--primary); box-shadow: 0 4px 12px var(--primary-glow);">
+        🔐
+      </div>
+      <h2 style="font-size: 1.6rem; font-weight: 900; color: var(--text-main); margin-bottom: 0.5rem;">Admin Verification</h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.75rem; line-height: 1.5;">
+        Enter your store management password to access inventory, sales analytics, and fulfillment.
+      </p>
+
+      <form id="admin-login-form" onsubmit="event.preventDefault(); handleLogin(event); return false;">
+        <div class="form-group" style="text-align: left;">
+          <label class="form-label" for="admin-password-input">Admin Password</label>
+          <input type="password" id="admin-password-input" class="form-control" placeholder="Enter admin password" autocomplete="current-password" required autofocus />
+        </div>
+
+        <div style="background: var(--bg-secondary); padding: 0.65rem 0.9rem; border-radius: var(--radius-md); font-size: 0.8rem; color: var(--text-muted); text-align: left; margin-bottom: 1.5rem; border: 1px solid var(--border-color);">
+          Use the password configured for this store.<br/>
+          <em>You can change this password anytime in the dashboard settings.</em>
+        </div>
+
+        <div id="login-error-msg" style="display: none; color: var(--danger); font-size: 0.85rem; font-weight: 700; margin-bottom: 1rem;"></div>
+
+        <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block" style="height: 48px; font-size: 0.95rem;">
+          Unlock Store Manager →
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. PROTECTED STORE MANAGER DASHBOARD (SHOWN WHEN LOGGED IN) -->
+  <main id="admin-dashboard-view" class="container" style="display: none; padding: 2.5rem 1.5rem 5rem; flex: 1;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
+      <div>
+        <h1 style="font-size: 1.85rem; font-weight: 900; color: var(--text-main);">Store Maintenance & Management</h1>
+        <p style="color: var(--text-muted); font-size: 0.95rem;">
+          Logged in as <strong id="admin-user-display" style="color: var(--primary);">admin</strong> • Full access to catalog, shelf controls, orders, and database.
+        </p>
+      </div>
+
+      <div style="display: flex; gap: 0.75rem;">
+        <button class="btn btn-secondary" onclick="openChangePasswordModal()">
+          🔑 Change Password
+        </button>
+        <button class="btn btn-primary" onclick="openAddProductModal()">
+          + Add New Product
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="admin-nav">
+      <button class="admin-tab-btn active" data-tab="tab-overview">📊 Business Overview</button>
+      <button class="admin-tab-btn" data-tab="tab-inventory">🏷️ Catalog & Shelf Management</button>
+      <button class="admin-tab-btn" data-tab="tab-orders">📦 Customer Orders</button>
+      <button class="admin-tab-btn" data-tab="tab-system">🖥️ Database & Cloud Status</button>
+    </div>
+
+    <!-- TAB 1: OVERVIEW -->
+    <div id="tab-overview" class="admin-tab-content">
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-card-title">Total Sales Revenue</div>
+          <div class="metric-card-val" id="metric-revenue">$0.00</div>
+          <div style="font-size: 0.8rem; color: var(--accent); margin-top: 0.5rem; font-weight: 600;">↑ Completed customer orders</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-card-title">Total Orders Placed</div>
+          <div class="metric-card-val" id="metric-orders">0</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Recorded in SQLite database</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-card-title">Awaiting Shipment</div>
+          <div class="metric-card-val" id="metric-pending" style="color: var(--warning);">0</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Requires fulfillment</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-card-title">Low Stock Warnings</div>
+          <div class="metric-card-val" id="metric-lowstock" style="color: var(--danger);">0</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Products ≤ 15 units left</div>
+        </div>
+      </div>
+
+      <!-- Low Stock Warnings -->
+      <div class="card" style="margin-bottom: 2.5rem;">
+        <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin-bottom: 1rem;">⚠️ Inventory Replenishment Needed</h3>
+        <div style="overflow-x: auto;">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Product Name</th>
+                <th>Retail Price</th>
+                <th>Current Stock</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="low-stock-table-body">
+              <!-- Inserted dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: INVENTORY & OFF-SHELF MANAGEMENT -->
+    <div id="tab-inventory" class="admin-tab-content" style="display: none;">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text-main);">Catalog Products & Shelf Control</h3>
+            <p style="font-size: 0.875rem; color: var(--text-muted); margin-top: 0.25rem;">
+              Click <strong>"Take Off Shelf"</strong> to hide an item from customers without deleting it, or <strong>"Put On Shelf"</strong> to restore it immediately.
+            </p>
+          </div>
+
+          <!-- Shelf Filter Controls -->
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <button class="catalog-filter-btn active" data-filter="all" onclick="setCatalogFilter('all')">
+              All (<span id="count-badge-total">0</span>)
+            </button>
+            <button class="catalog-filter-btn" data-filter="active" onclick="setCatalogFilter('active')">
+              ● On Shelf (<span id="count-badge-active">0</span>)
+            </button>
+            <button class="catalog-filter-btn" data-filter="inactive" onclick="setCatalogFilter('inactive')">
+              ○ Off Shelf (<span id="count-badge-inactive">0</span>)
+            </button>
+          </div>
+        </div>
+
+        <div style="overflow-x: auto;">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Photo</th>
+                <th>Product Name</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Inventory</th>
+                <th>Visibility</th>
+                <th>Quick Actions</th>
+              </tr>
+            </thead>
+            <tbody id="products-table-body">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: ORDERS -->
+    <div id="tab-orders" class="admin-tab-content" style="display: none;">
+      <div class="card">
+        <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text-main); margin-bottom: 1.25rem;">Customer Orders List</h3>
+        <div style="overflow-x: auto;">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Order Ref</th>
+                <th>Customer</th>
+                <th>Date</th>
+                <th>Total</th>
+                <th>Fulfillment Status</th>
+                <th>Carrier & Tracking</th>
+                <th>Receipt</th>
+              </tr>
+            </thead>
+            <tbody id="orders-table-body">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: DATABASE & SYSTEM STATUS -->
+    <div id="tab-system" class="admin-tab-content" style="display: none;">
+      <!-- Live SQL Database Proof Card -->
+      <div class="card" style="margin-bottom: 2rem; border-left: 6px solid var(--primary);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div>
+            <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text-main);">🗄️ Active SQL Database Information</h3>
+            <p style="color: var(--text-muted); font-size: 0.875rem;">
+              This store runs on an embedded, ACID-compliant SQLite 3 relational database. All catalog edits and orders persist automatically.
+            </p>
+          </div>
+          <span class="stock-status stock-in" style="font-size: 0.8rem;">● Database Connected</span>
+        </div>
+
+        <div style="background: var(--bg-secondary); border-radius: var(--radius-md); padding: 1.25rem; font-size: 0.875rem; border: 1px solid var(--border-color);">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.75rem;">
+            <div>
+              <span style="color: var(--text-muted); font-weight: 600;">Database Engine:</span>
+              <strong id="db-engine-val" style="color: var(--text-main); display: block;">Loading...</strong>
+            </div>
+            <div>
+              <span style="color: var(--text-muted); font-weight: 600;">Journal / Concurrency Mode:</span>
+              <strong id="db-mode-val" style="color: var(--text-main); display: block;">Loading...</strong>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 0.75rem;">
+            <div>
+              <span style="color: var(--text-muted); font-weight: 600;">Local Database File on Disk:</span>
+              <code id="db-file-val" style="color: var(--primary); font-weight: 700; word-break: break-all; display: block;">Loading...</code>
+            </div>
+            <div>
+              <span style="color: var(--text-muted); font-weight: 600;">Current Database Size:</span>
+              <strong id="db-size-val" style="color: var(--text-main); display: block;">Loading...</strong>
+            </div>
+          </div>
+          <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.75rem;">
+            <span style="color: var(--text-muted); font-weight: 600;">Persisted Records in Tables:</span>
+            <div id="db-counts-val" style="color: var(--text-main); font-weight: 700; margin-top: 0.25rem;">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Server & Health Card -->
+      <div class="card" style="margin-bottom: 2rem;">
+        <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin-bottom: 1.25rem;">Live Server Status (`/api/health`)</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem;">
+          <div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Status</div>
+            <span id="health-status-badge" class="stock-status stock-in" style="margin-top: 0.35rem;">HEALTHY</span>
+          </div>
+          <div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Server Uptime</div>
+            <div id="health-uptime" style="font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">--</div>
+          </div>
+          <div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Database Engine</div>
+            <div id="health-db" style="font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">--</div>
+          </div>
+          <div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Environment</div>
+            <div id="health-env" style="font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">--</div>
+          </div>
+          <div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">RAM Allocation</div>
+            <div id="health-mem" style="font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">--</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- CHANGE PASSWORD MODAL -->
+  <div class="modal-overlay" id="change-password-modal">
+    <div class="modal-dialog">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 style="color: var(--text-main); font-size: 1.35rem; font-weight: 900;">Change Admin Password</h2>
+        <button onclick="closeChangePasswordModal()" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
+      </div>
+
+      <form onsubmit="handleChangePassword(event)">
+        <div class="form-group">
+          <label class="form-label">New Password</label>
+          <input type="password" id="new-admin-password" class="form-control" required placeholder="Enter new strong password" minlength="12" autocomplete="new-password" />
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem;">
+          Use at least 12 characters. Other signed-in sessions will be logged out.
+        </p>
+        <div style="display: flex; justify-content: flex-end; gap: 1rem;">
+          <button type="button" class="btn btn-secondary" onclick="closeChangePasswordModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Update Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ADD PRODUCT MODAL -->
+  <div class="modal-overlay" id="add-product-modal">
+    <div class="modal-dialog">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 style="color: var(--text-main); font-size: 1.35rem; font-weight: 900;">Add New Product to Store</h2>
+        <button onclick="closeAddProductModal()" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
+      </div>
+
+      <form onsubmit="handleAddProduct(event)">
+        <div class="form-group">
+          <label class="form-label">Product Title *</label>
+          <input type="text" name="name" class="form-control" required placeholder="e.g. Studio Monitor Stand (Pair)" />
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Category *</label>
+            <select name="category" class="form-control" required>
+              <option value="Audio & Sound">Audio & Sound</option>
+              <option value="Wearables & Tech">Wearables & Tech</option>
+              <option value="Workspace & Ergonomics">Workspace & Ergonomics</option>
+              <option value="Photography & Gear">Photography & Gear</option>
+              <option value="Travel & Everyday Carry">Travel & Everyday Carry</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Initial Stock Units *</label>
+            <input type="number" name="stock" class="form-control" required value="25" min="0" />
+          </div>
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Retail Price ($) *</label>
+            <input type="number" step="0.01" name="price" class="form-control" required placeholder="149.99" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Compare-at / Original Price ($)</label>
+            <input type="number" step="0.01" name="compare_at_price" class="form-control" placeholder="179.99" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Product Image URL *</label>
+          <input type="url" name="image_url" class="form-control" required placeholder="https://images.unsplash.com/..." value="https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=800&q=80" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea name="description" class="form-control" rows="3" placeholder="Detailed product specifications, materials, and benefits..."></textarea>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
+          <input type="checkbox" name="is_featured" id="chk-featured" />
+          <label for="chk-featured" style="color: var(--text-main); font-size: 0.9rem; font-weight: 600; cursor: pointer;">Feature this item on homepage hero grid</label>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
+          <button type="button" class="btn btn-secondary" onclick="closeAddProductModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Publish to Store</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- EDIT PRODUCT MODAL -->
+  <div class="modal-overlay" id="edit-product-modal">
+    <div class="modal-dialog">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 style="color: var(--text-main); font-size: 1.35rem; font-weight: 900;">Edit Product Details</h2>
+        <button onclick="closeEditProductModal()" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
+      </div>
+
+      <form id="edit-product-form" onsubmit="handleEditProduct(event)">
+        <input type="hidden" name="productId" />
+
+        <div class="form-group">
+          <label class="form-label">Product Title *</label>
+          <input type="text" name="name" class="form-control" required />
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Category *</label>
+            <select name="category" class="form-control" required>
+              <option value="Audio & Sound">Audio & Sound</option>
+              <option value="Wearables & Tech">Wearables & Tech</option>
+              <option value="Workspace & Ergonomics">Workspace & Ergonomics</option>
+              <option value="Photography & Gear">Photography & Gear</option>
+              <option value="Travel & Everyday Carry">Travel & Everyday Carry</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Stock Units *</label>
+            <input type="number" name="stock" class="form-control" required min="0" />
+          </div>
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Retail Price ($) *</label>
+            <input type="number" step="0.01" name="price" class="form-control" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Compare-at Price ($)</label>
+            <input type="number" step="0.01" name="compare_at_price" class="form-control" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Product Image URL *</label>
+          <input type="url" name="image_url" class="form-control" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea name="description" class="form-control" rows="3"></textarea>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
+          <input type="checkbox" name="is_featured" id="edit-chk-featured" />
+          <label for="edit-chk-featured" style="color: var(--text-main); font-size: 0.9rem; font-weight: 600; cursor: pointer;">Feature this item on homepage</label>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
+          <button type="button" class="btn btn-secondary" onclick="closeEditProductModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-bottom" style="border: none; padding-top: 0;">
+      <div>© 2026 Apex Goods Co. Merchant Center</div>
+      <a href="/">Back to Public Storefront</a>
+    </div>
+  </footer>
+
+  <script src="/js/api.js?v=auth_v4"></script>
+  <script src="/js/cart.js?v=auth_v4"></script>
+  <script src="/js/admin.js?v=auth_v4"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "name": "modern-ecommerce-platform",
+  "version": "1.1.0",
+  "description": "Apex Goods storefront and store manager with SQLite and demo checkout",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/seed.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "ecommerce",
+    "shopping-cart",
+    "aws",
+    "oci",
+    "docker",
+    "nginx",
+    "production-ready"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

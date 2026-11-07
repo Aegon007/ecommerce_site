@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Track your order | Apex Goods Co.</title><link rel="stylesheet" href="/css/styles.css"/></head>
+<body>
+<header class="navbar"><div class="container nav-container"><a href="/" class="nav-brand"><span class="nav-brand-icon">A</span><span>APEX GOODS.</span></a><a href="/" class="nav-link-btn">← Back to the collection</a></div></header>
+<main class="container" style="max-width:860px;padding-top:2.5rem;padding-bottom:4rem;flex:1">
+  <p class="eyebrow">YOUR APEX ORDER</p><h1 style="font-size:2rem;letter-spacing:-.04em;margin:.5rem 0 1.5rem">Good things are on their way.</h1>
+  <section class="card" style="margin-bottom:1.5rem"><h2 style="font-size:1.1rem;margin-bottom:.5rem">Track your order</h2><p style="font-size:.85rem;color:var(--text-muted);margin-bottom:1rem">Enter your order reference and the email address used at checkout.</p>
+    <form id="tracking-form" class="tracking-form"><div class="form-group"><label class="form-label" for="track-order-input">Order reference</label><input id="track-order-input" class="form-control" placeholder="ORD-…" required maxlength="64"/></div><div class="form-group"><label class="form-label" for="track-email-input">Email address</label><input id="track-email-input" class="form-control" type="email" autocomplete="email" placeholder="you@example.com" required/></div><button class="btn btn-primary" id="track-button">Find order</button></form><p id="tracking-message" role="status" class="checkout-error"></p>
+  </section>
+  <section id="confirmation-content" class="card" hidden></section>
+</main>
+<footer class="footer"><div class="container footer-bottom" style="border:0;padding-top:0"><span>© 2026 Apex Goods Co.</span><a href="/">Continue exploring ↗</a></div></footer>
+<script src="/js/api.js"></script><script src="/js/order.js"></script>
+</body></html>

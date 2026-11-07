@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shopping Cart & Checkout | Apex Goods Co.</title>
+  <link rel="stylesheet" href="/css/styles.css?v=warm_2" />
+</head>
+<body>
+
+  <!-- Top Announcement Bar -->
+  <div class="announcement-bar">
+    <span>Free shipping on orders $75+</span>
+    <span>•</span>
+    <span>Use Code <code>WELCOME10</code> for 10% off orders $50+</span>
+  </div>
+
+  <!-- Navigation Header -->
+  <header class="navbar">
+    <div class="container nav-container">
+      <a href="/" class="nav-brand">
+        <div class="nav-brand-icon">A</div>
+        <span>APEX GOODS</span>
+      </a>
+
+      <div class="nav-links" style="margin-left: auto;">
+        <a href="/" class="nav-link-btn">← Continue Shopping</a>
+        <a href="/cart.html" class="cart-btn">
+          <span>🛒</span>
+          <span>Cart</span>
+          <span class="cart-count" style="display: none;">0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" style="flex: 1;">
+    <div style="margin: 2.5rem 0 1rem;">
+      <h1 style="font-size: 2.1rem; font-weight: 900; color: var(--text-main);">Review Your Cart</h1>
+      <p style="color: var(--text-muted); font-size: 0.95rem;">Verify your items, apply promo codes, and proceed to checkout.</p>
+    </div>
+
+    <!-- Free Shipping Progress Indicator -->
+    <div id="free-shipping-banner" class="card" style="margin-bottom: 2rem; padding: 1.25rem 1.75rem; background: var(--bg-surface); border-color: var(--primary-light);">
+      <div id="free-shipping-text" style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.6rem;">
+        Calculating shipping eligibility...
+      </div>
+      <div style="background: var(--bg-secondary); height: 10px; border-radius: 9999px; overflow: hidden;">
+        <div id="free-shipping-bar" style="background: var(--primary); height: 100%; width: 0%; transition: width 0.4s ease;"></div>
+      </div>
+    </div>
+
+    <!-- Main Cart Layout -->
+    <div class="cart-layout" id="cart-content-wrapper">
+      <!-- Left: Item List -->
+      <div class="card">
+        <div id="cart-items-container">
+          <!-- Items dynamically rendered here -->
+        </div>
+      </div>
+
+      <!-- Right: Summary & Checkout -->
+      <div>
+        <div class="card" style="position: sticky; top: 6rem;">
+          <h2 style="font-size: 1.35rem; font-weight: 800; color: var(--text-main); margin-bottom: 1.25rem;">Order Summary</h2>
+
+          <!-- Promo Code Input -->
+          <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
+            <input type="text" id="coupon-input" aria-label="Promo code" class="form-control" placeholder="Promo code" style="text-transform: uppercase;" />
+            <button class="btn btn-secondary" id="apply-coupon" onclick="applyCouponCode()">Apply</button>
+          </div>
+          <button type="button" class="text-button" id="remove-coupon" hidden onclick="Cart.setCoupon(null); document.getElementById('coupon-input').value = '';">Remove promo code</button><div id="coupon-alert" style="margin-bottom: 1rem; font-size: 0.85rem; display: none; font-weight: 600;"></div>
+
+          <!-- Summary Breakdown -->
+          <div class="summary-row">
+            <span>Subtotal</span>
+            <span id="summary-subtotal" style="font-weight: 700; color: var(--text-main);">$0.00</span>
+          </div>
+
+          <div class="summary-row" id="row-discount" style="display: none; color: var(--accent); font-weight: 600;">
+            <span>Discount (<span id="discount-code-label"></span>)</span>
+            <span id="summary-discount">-$0.00</span>
+          </div>
+
+          <div class="summary-row">
+            <span>Estimated Shipping</span>
+            <span id="summary-shipping" style="font-weight: 700; color: var(--text-main);">$0.00</span>
+          </div>
+
+          <div class="summary-row">
+            <span>Estimated tax (<span id="tax-rate-label">8</span>%)</span>
+            <span id="summary-tax" style="font-weight: 700; color: var(--text-main);">$0.00</span>
+          </div>
+
+          <div class="summary-row summary-total">
+            <span>Total</span>
+            <span id="summary-total">$0.00</span>
+          </div>
+
+          <p id="checkout-error" role="alert" class="checkout-error"></p><button disabled id="btn-open-checkout" class="btn btn-primary btn-block" style="margin-top: 1.5rem; height: 50px; font-size: 1rem;" onclick="openCheckoutModal()">
+            Proceed to Checkout →
+          </button>
+
+          <div style="display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1.25rem; font-size: 0.8rem; color: var(--text-muted);">
+            <span>Review before placing your order</span>
+            <span>•</span>
+            <span>Demo mode · no charge</span>
+            <span>•</span>
+            
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="cart-empty-state" class="card" style="display: none; text-align: center; padding: 5rem 2rem; margin: 3rem 0;">
+      <div style="font-size: 3.5rem; margin-bottom: 1rem;">🛍️</div>
+      <h2 style="color: var(--text-main); font-size: 1.6rem; font-weight: 800; margin-bottom: 0.5rem;">Your Cart is Empty</h2>
+      <p style="color: var(--text-muted); margin-bottom: 1.5rem;">You haven't added any products to your cart yet.</p>
+      <a href="/" class="btn btn-primary">Discover Products</a>
+    </div>
+  </main>
+
+  <!-- Checkout Modal Dialog -->
+  <div class="modal-overlay" id="checkout-modal" role="dialog" aria-modal="true" aria-label="Checkout" aria-hidden="true">
+    <div class="modal-dialog">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 style="color: var(--text-main); font-size: 1.4rem; font-weight: 900;">Checkout</h2>
+        <button type="button" aria-label="Close checkout" onclick="closeCheckoutModal()" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
+      </div>
+
+      <form id="checkout-form" onsubmit="submitOrder(event)">
+        <!-- Step 1: Customer Info -->
+        <h3 style="font-size: 0.95rem; font-weight: 800; color: var(--primary); text-transform: uppercase; margin-bottom: 0.75rem; letter-spacing: 0.5px;">
+          1. Customer Contact
+        </h3>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="cust-name">Full Name *</label>
+            <input type="text" id="cust-name" autocomplete="name" class="form-control" placeholder="Alex Morgan" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="cust-email">Email Address *</label>
+            <input type="email" id="cust-email" autocomplete="email" class="form-control" placeholder="alex@example.com" required />
+          </div>
+        </div>
+
+        <!-- Step 2: Shipping Info -->
+        <h3 style="font-size: 0.95rem; font-weight: 800; color: var(--primary); text-transform: uppercase; margin: 1.25rem 0 0.75rem; letter-spacing: 0.5px;">
+          2. Shipping Address
+        </h3>
+        <div class="form-group">
+          <label class="form-label" for="ship-address">Street Address *</label>
+            <input type="text" id="ship-address" autocomplete="street-address" class="form-control" placeholder="500 Pine Street, Suite 300" required />
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="ship-city">City *</label>
+            <input type="text" id="ship-city" autocomplete="address-level2" class="form-control" placeholder="Seattle" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ship-state">State / Province</label>
+            <input type="text" id="ship-state" autocomplete="address-level1" class="form-control" placeholder="WA" />
+          </div>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="ship-zip">ZIP / Postal Code *</label>
+            <input type="text" id="ship-zip" autocomplete="postal-code" class="form-control" placeholder="98101" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ship-country">Country</label>
+            <select id="ship-country" autocomplete="country-name" class="form-control">
+              <option value="United States">United States</option>
+              <option value="Canada">Canada</option>
+              <option value="United Kingdom">United Kingdom</option>
+              <option value="Germany">Germany</option>
+              <option value="Australia">Australia</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="demo-notice" id="payment-mode-notice" role="status"><strong>Demo checkout</strong><p>Create a test order to try the store. No payment will be taken. Please use test contact details.</p></div>
+
+        <div style="border-top: 1px solid var(--border-color); padding-top: 1.25rem; margin-top: 1.5rem; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Amount Due</div>
+            <div id="modal-checkout-total" style="font-size: 1.4rem; font-weight: 900; color: var(--text-main);">$0.00</div>
+          </div>
+          <button type="submit" id="btn-submit-order" class="btn btn-primary" style="height: 48px; padding: 0 2rem;">
+            Place Demo Order
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-bottom" style="border: none; padding-top: 0;">
+      <div>© 2026 Apex Goods Co.</div>
+      <a href="/">Back to Storefront</a>
+    </div>
+  </footer>
+
+  <script src="/js/api.js?v=v4"></script>
+  <script src="/js/cart.js?v=v4"></script>
+  <script src="/js/checkout.js"></script>
+</body>
+</html>
