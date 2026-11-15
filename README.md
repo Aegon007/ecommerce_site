@@ -22,13 +22,135 @@ sh ./run.sh
 
 ## Linux 部署（无需 Docker）
 
-一台服务器可以直接运行 Node.js，由 systemd 保持服务运行，并由 Caddy 提供 HTTPS。已有 Nginx 等反向代理也可以沿用，只需将正式域名转发到 `127.0.0.1:3000`。
+下面按 **本机 Windows 11、服务器 Ubuntu Server 20.04 LTS** 编写，适用于 `amd64`（Intel/AMD 64 位）或 `arm64`（ARM 64 位）服务器。你需要服务器的公网 IP、可以用 `sudo` 的登录账号，以及一个已注册的域名。按顺序运行命令，遇到报错先处理当前步骤。
 
-### 用脚本部署
+| 软件 | 在这个网站里做什么 |
+| --- | --- |
+| Node.js | 运行网站的 JavaScript 后端，处理商品、登录和询盘。 |
+| npm | 安装后端依赖。下面安装的 Node.js 软件包已包含 npm。 |
+| Caddy | 接收来自公网的 HTTP 和 HTTPS 请求，把请求转给本机的 Node.js，并自动申请和续期 HTTPS 证书。 |
+| systemd | Ubuntu 自带的服务管理器，让网站随服务器开机启动，崩溃后可以自动重启。 |
+| SQLite | 将商品和询盘保存在一个数据库文件里。所需功能已随 Node.js 提供。 |
 
-在使用 systemd 的 Linux 服务器上，先安装可供系统用户使用的 Node.js 22.13+、npm、`curl` 和带 `caddy.service` 的 [Caddy](https://caddyserver.com/docs/install)。脚本也会用到 `ss` 和 `flock`，Ubuntu 上分别由 `iproute2` 和 `util-linux` 提供。将项目放在 `/opt/ecommerce_website`，让有 `sudo` 权限的部署账号拥有并能更新项目，同时给服务账号读取项目所需的目录和文件权限。
+### 1. 登录服务器
 
-首次创建 `.env` 时，在项目目录执行 `install -m 600 .env.example .env`。编辑 `.env` 中的对应项，将域名换成你自己的，并填写初始密码及 [SMTP 配置](#inquiry-email)。已有上线数据时，保留数据库并让 `DB_PATH` 指向它。脚本使用 `/var/lib/apex-goods` 保存 SQLite，其他路径可按下方手动部署步骤配置权限和服务。
+在云平台控制台找到服务器的公网 IP 和 SSH 用户名，准备创建服务器时保存的登录私钥。打开 **Windows 11 上的 PowerShell**。如果运行 `ssh -V` 提示找不到命令，在 Windows 搜索 **可选功能**，添加 **OpenSSH 客户端**，再重新打开 PowerShell。[Windows 上安装 OpenSSH](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse)
+
+下面假设用户名是 `ubuntu`、SSH 端口是 `22`。替换示例 IP、用户名和 `.pem` 私钥路径。若服务器允许密码登录，或你已将私钥放在 SSH 的默认位置，可去掉 `-i` 及后面的路径。第一次连接时，核对服务器的 SSH 指纹后接受连接。[Windows 上使用 SSH](https://learn.microsoft.com/en-us/windows/terminal/tutorials/ssh)
+
+```powershell
+ssh -i "C:\Users\你的用户名\Downloads\server-key.pem" ubuntu@203.0.113.10
+```
+
+登录成功后，下面的 Linux 命令都在**服务器的 SSH 窗口**里执行。系统信息应显示 `VERSION_ID="20.04"`，架构应为 `amd64` 或 `arm64`。`sudo -v` 可能要求输入服务器账号的密码，终端输入密码时不会显示字符。
+
+```bash
+cat /etc/os-release
+dpkg --print-architecture
+sudo -v
+```
+
+Ubuntu 20.04 已结束常规安全维护。继续用这版系统对外运行网站时，可以通过 Ubuntu Pro 的扩展安全维护（ESM）获取系统补丁。先在服务器检查 `pro status`。若找不到 `pro`，运行 `sudo apt update` 和 `sudo apt install ubuntu-advantage-tools`。若显示尚未绑定，运行 `sudo pro attach`，在本机浏览器打开终端给出的网址，按提示绑定。再用 `pro status` 检查 `esm-infra` 和 `esm-apps`，对尚未启用的项目分别运行 `sudo pro enable esm-infra` 或 `sudo pro enable esm-apps`。最后运行 `sudo apt update` 和 `sudo apt upgrade` 安装更新。[Ubuntu 20.04 支持周期](https://ubuntu.com/project/docs/release-team/list-of-releases/#expanded-security-maintenance) · [Ubuntu Pro 绑定步骤](https://ubuntu.com/pro-client/docs/en/docs/tutorials/basic_commands/)
+
+### 2. 安装 Node.js 和 npm
+
+`apt` 是 Ubuntu 安装和更新软件的工具。先更新软件清单，装好 Git（下载项目）、curl（下载或检查网址）、GnuPG（配置软件源签名）和 nano（编辑配置文件）等工具。
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg git nano openssh-client \
+  iproute2 util-linux dnsutils ufw
+```
+
+项目至少需要 **Node.js 22.13**。这里通过支持 Ubuntu 20.04 的 NodeSource 软件源安装 **Node.js 24 LTS**，让服务器上的服务账号也能用 `node` 和 `npm`。下面先添加用于验证软件包的签名公钥，再告诉 `apt` 从哪里获取 24.x 软件包。[NodeSource 兼容列表](https://github.com/nodesource/distributions/blob/master/DEV_README.md#deb-supported-versions) · [NodeSource 软件源配置](https://github.com/nodesource/distributions/blob/master/scripts/deb/setup_24.x)
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+  | sudo gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+sudo chmod 644 /etc/apt/keyrings/nodesource.gpg
+printf 'deb [arch=%s signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main\n' "$(dpkg --print-architecture)" \
+  | sudo tee /etc/apt/sources.list.d/nodesource.list > /dev/null
+sudo apt update
+sudo apt install -y nodejs
+```
+
+确认 `node` 显示 `v24.x.x`、`npm` 显示版本号、`command -v node` 显示 `/usr/bin/node`。最后一条检查内置 SQLite，成功时不会打印内容。
+
+```bash
+node --version
+npm --version
+command -v node
+node --no-warnings -e "require('node:sqlite')"
+```
+
+### 3. 安装 Caddy
+
+添加 Caddy 官方稳定版的软件源，再安装 `caddy`。这个软件包会一并创建 `caddy.service` 和默认配置文件 `/etc/caddy/Caddyfile`。后面的部署脚本会把正式域名写入该文件。[Caddy 官方安装说明](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+  | sudo gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
+sudo chmod 644 /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+  /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy
+caddy version
+systemctl is-active caddy
+```
+
+最后一条应显示 `active`。如果显示 `failed`，用 `sudo journalctl -u caddy -n 50 --no-pager` 看原因。若日志提示端口已被占用，用 `sudo ss -ltnp` 查谁在使用 `80` 或 `443`。已有 Nginx 或 Apache 的服务器需要先决定由哪个服务接收公网请求。
+
+### 4. 下载项目到服务器
+
+先确认最新代码已从你电脑推送到 GitHub。`/opt/ecommerce_website` 是**服务器上的目录**。下面创建这个目录并交给当前 SSH 用户管理，再把项目直接克隆进去。`git clone` 最后的 `.` 表示放到当前目录。下面的克隆命令只在首次安装、目录为空时执行。
+
+```bash
+sudo install -d -m 0755 -o "$(id -un)" -g "$(id -gn)" /opt/ecommerce_website
+cd /opt/ecommerce_website
+git clone https://github.com/Aegon007/ecommerce_site.git .
+ls -l package.json deploy/deploy-linux.sh
+```
+
+如果用了自己的 GitHub 仓库，从仓库页面点 **Code → HTTPS** 复制地址，替换上面的地址。
+
+<details>
+<summary>GitHub 仓库是私有的，怎么让服务器下载？</summary>
+
+用一把只供此仓库读取的部署密钥。先在**服务器**上生成密钥。提示输入短语时，可以为此密钥设置密码；以后手动拉取代码时需要解锁它。
+
+```bash
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+ssh-keygen -t ed25519 -C 'ecommerce-server-deploy' -f ~/.ssh/ecommerce_github
+cat ~/.ssh/ecommerce_github.pub
+```
+
+复制 `cat` 显示的那一行公钥，到 GitHub 该仓库的 **Settings → Deploy keys → Add deploy key** 添加，**Allow write access** 保持未勾选。然后在服务器执行以下命令替代 HTTPS 克隆。第一次连接 GitHub 时，对照官方指纹再接受连接。[GitHub 部署密钥](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys) · [GitHub SSH 指纹](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)
+
+```bash
+cd /opt/ecommerce_website
+git clone -c core.sshCommand="ssh -i $HOME/.ssh/ecommerce_github -o IdentitiesOnly=yes" \
+  git@github.com:Aegon007/ecommerce_site.git .
+ls -l package.json deploy/deploy-linux.sh
+```
+
+</details>
+
+### 5. 填写网站配置并连接域名
+
+`.env` 是服务器上的配置文件，用来保存正式域名、初始管理员密码和 SMTP 发信设置。它以 `.` 开头，是隐藏文件，可以用 `ls -a` 查看文件名。下面从模板创建 `.env`，已有文件时直接打开编辑。
+
+```bash
+cd /opt/ecommerce_website
+test -e .env || install -m 600 .env.example .env
+nano .env
+```
+
+在 nano 里找到以下设置，改成示例的格式。模板中某一行以 `#` 开头时，去掉该行开头的 `#` 才会生效。把 `www.example.com` 换成你的主站域名，`https://` 保留，地址末尾无需加 `/`。首次创建数据库时，把 `ADMIN_PASSWORD=""` 的引号内填上至少 **12 个字符**的独立密码，默认登录名是 `admin`。
 
 ```dotenv
 NODE_ENV=production
@@ -37,57 +159,75 @@ PORT=3000
 APP_ORIGIN=https://www.example.com
 TRUST_PROXY=true
 DB_PATH=/var/lib/apex-goods/ecommerce.db
-ADMIN_PASSWORD=
+ADMIN_PASSWORD=""
 SEED_DEMO_DATA=false
 ENABLE_DEMO_CHECKOUT=false
 ```
 
-把网站域名的 DNS 指向服务器，开放公网 `80/tcp` 和 `443/tcp`。通过 Cloudflare 管理 DNS 时，先按 [域名接入步骤](#cloudflare-domain) 添加灰云记录，等源站 HTTPS 可用再开启代理。
+保存时按 **Ctrl+O**，按 **Enter** 确认文件名，再按 **Ctrl+X** 退出。`HOST=127.0.0.1` 让 Node.js 只接受服务器本机的连接，由 Caddy 对外服务。`DB_PATH` 是数据库文件的位置，第一次部署时会自动创建。已有正式数据时继续用原来的数据库，脚本部署的数据库放在 `/var/lib/apex-goods/` 下。需要发邮件时在同一个文件补齐 [SMTP 设置](#inquiry-email)。
 
-用项目所有者的账号运行命令。脚本从 `APP_ORIGIN` 读取主站域名，并在需要修改系统配置时使用 `sudo`。下例的参数是要跳转到主站的根域名。如果主站直接使用根域名，或只使用 `www`，省略该参数即可。
+域名要先通过 DNS 指向服务器。在管理该域名 DNS 的平台上，为根域名 `@` 增加 `A` 记录，填服务器公网 IPv4，再为 `www` 增加 `CNAME` 记录，填你的根域名。如果使用 Cloudflare，按 [域名接入的第 1、2 步](#cloudflare-domain) 添加记录，初次部署选 **DNS only**（灰云）。可以在服务器用 `dig +short A www.example.com` 核对解析结果是否包含服务器公网 IP，记得替换域名。
+
+在云平台控制台找到**防火墙**或**安全组**的入站规则，开放网站用的 `80/tcp` 和 `443/tcp`，保留现有的 SSH 规则。应用的 `3000` 只供本机使用。Ubuntu 上可以用 `sudo ufw status` 检查本机防火墙。如果它显示 `Status: active`，还要运行下面两条命令。[Ubuntu 防火墙说明](https://ubuntu.com/server/docs/how-to/security/firewalls/)
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+### 6. 运行部署脚本并验证
+
+继续使用先前的普通 SSH 账号运行脚本，脚本需要修改系统配置时会调用 `sudo`。如果 `.env` 里用了 `https://www.example.com`，下面的参数 `example.com` 会把裸域名跳转到 `www`。换成你自己的根域名。如果主站直接用裸域名，或只配置了 `www` 这一条 DNS，运行 `bash deploy/deploy-linux.sh` 即可。
 
 ```bash
 cd /opt/ecommerce_website
 bash deploy/deploy-linux.sh example.com
 ```
 
-脚本以专用账号运行应用，限制 `.env` 和数据库目录的访问权限，配置 `apex-goods.service` 并检查本机 `/api/health`，然后加载 Caddy 站点并启用开机启动。Caddy 会申请和续期证书。随后从外网验证 `curl -fsS https://www.example.com/api/health`、后台登录和询盘发信。[Caddy 自动 HTTPS](https://caddyserver.com/docs/automatic-https)
+脚本会用 npm 按 `package-lock.json` 安装网站依赖，创建专用账号 `apex-goods` 和数据库目录，配置网站的 systemd 服务和 Caddy。出现 `Local health check passed` 表示服务器本机的网站已运行。Caddy 接下来会用你的域名自动申请和续期证书。[Caddy 自动 HTTPS](https://caddyserver.com/docs/automatic-https)
 
-更新代码或 `.env` 后，重新执行同一命令，保留原来的跳转参数和 `DB_PATH`。脚本只替换带标记的站点配置块，保留 Caddy 的全局设置和其他站点。如果新配置加载失败，脚本会尝试恢复上一份 Caddyfile。若 Caddyfile 中已有手写的同名站点，请备份并移出旧块后再执行。部署异常时，用 `sudo journalctl -u apex-goods -u caddy -n 100 --no-pager` 查看日志。
+```bash
+systemctl is-active apex-goods caddy
+curl -fsS http://127.0.0.1:3000/api/health
+```
 
-### 手动部署
+两个服务都应显示 `active`。`curl` 应返回包含 `"status":"healthy"` 和 `"database":"connected"` 的内容。再回到自己电脑的浏览器，用真实域名访问 `https://www.example.com`、`https://www.example.com/admin.html` 和 `https://www.example.com/contact.html`，实际登录后台并提交一条测试询盘。配置了 SMTP 时，也核对业务邮箱。使用 Cloudflare 时，确认源站的 HTTPS 已可访问，再按 [Cloudflare 第 3、4 步](#cloudflare-domain) 开启代理并复测。
 
-1. 将项目放在 `/opt/ecommerce_website`。安装 Node.js 22.13+、npm 和 [Caddy](https://caddyserver.com/docs/install)，创建专用系统用户和数据库目录。
+### 日后更新和排查
+
+新代码已推送到 GitHub 后，在服务器执行下面的命令。保留原来的 `DB_PATH` 和跳转参数。仅修改 `.env` 时，重新运行最后一条命令即可。
+
+```bash
+cd /opt/ecommerce_website
+git pull --ff-only
+bash deploy/deploy-linux.sh example.com
+```
+
+如果部署或 HTTPS 检查有问题，在服务器查看日志。脚本会保留 Caddy 的全局设置和其他站点，已有手写的同名站点配置时请先备份，再移出旧块。
+
+```bash
+sudo journalctl -u apex-goods -u caddy -n 100 --no-pager
+```
+
+<a id="manual-linux-deploy"></a>
+
+### 手动部署（需要自己维护服务配置时）
+
+完成上面的第 1–5 步后，可以用下面的命令代替第 6 步。用部署脚本时可以跳过本节。
+
+1. 创建让 systemd 运行网站的专用账号 `apex-goods`、给它数据库目录和 `.env` 的读取权限，再用当前登录账号安装项目依赖。日常登录服务器仍使用原来的 SSH 账号。
 
    ```sh
-   sudo useradd --system --home-dir /var/lib/apex-goods --shell /usr/sbin/nologin apex-goods
-   sudo install -d -o apex-goods -g apex-goods -m 700 /var/lib/apex-goods
-   sudo chown -R apex-goods:apex-goods /opt/ecommerce_website
    cd /opt/ecommerce_website
-   sudo -u apex-goods npm ci --omit=dev
+   id -u apex-goods >/dev/null 2>&1 || \
+     sudo useradd --system --user-group --home-dir /var/lib/apex-goods --shell /usr/sbin/nologin apex-goods
+   sudo install -d -o apex-goods -g apex-goods -m 0700 /var/lib/apex-goods
+   sudo chgrp apex-goods .env
+   chmod 640 .env
+   npm ci --omit=dev --ignore-scripts
    ```
 
-2. 如果还没有 `.env`，复制模板并按下面的示例编辑。`ADMIN_PASSWORD` 填你自己的初始密码。
-
-   ```sh
-   sudo -u apex-goods cp -n .env.example .env
-   sudo chmod 600 .env
-   sudoedit .env
-   ```
-
-   ```dotenv
-   NODE_ENV=production
-   HOST=127.0.0.1
-   PORT=3000
-   APP_ORIGIN=https://www.example.com
-   TRUST_PROXY=true
-   DB_PATH=/var/lib/apex-goods/ecommerce.db
-   ADMIN_PASSWORD="替换成至少 12 个字符的唯一密码"
-   SEED_DEMO_DATA=false
-   ENABLE_DEMO_CHECKOUT=false
-   ```
-
-3. 创建 `/etc/systemd/system/apex-goods.service`。用 `command -v node` 确认 Node 的绝对路径，确保服务用户能执行它。
+2. 运行 `sudo nano /etc/systemd/system/apex-goods.service`，粘贴下面的内容并保存。用 `command -v node` 确认 Node 的路径。如果路径与示例不同，将 `ExecStart` 的 `/usr/bin/node` 改成服务器上实际可执行的路径。
 
    ```ini
    [Unit]
@@ -113,25 +253,31 @@ bash deploy/deploy-linux.sh example.com
    curl -fsS http://127.0.0.1:3000/api/health
    ```
 
-4. 将域名的 DNS 指向服务器，开放公网 `80` 和 `443`，应用端口 `3000` 保持本机访问。将下面的站点块加入 `/etc/caddy/Caddyfile`，域名与 `APP_ORIGIN` 一致。Caddy 会申请和续期证书。使用 Cloudflare 时，按下方步骤设置 DNS、HTTPS 和访客 IP。[接入域名和 Cloudflare](#cloudflare-domain) · [Caddy HTTPS 条件](https://caddyserver.com/docs/automatic-https)
+3. 运行 `sudo nano /etc/caddy/Caddyfile`，将下面的站点块加到文件末尾，替换站点和跳转中的示例域名。网站主地址要与 `.env` 中的 `APP_ORIGIN` 一致。如果只配置了一个域名，保留主站的 `reverse_proxy` 块即可。如果文件里已经有同名站点，编辑已有的那一块。
 
    ```caddyfile
+   example.com {
+       redir https://www.example.com{uri} permanent
+   }
+
    www.example.com {
        reverse_proxy 127.0.0.1:3000 {
-           header_up X-Real-IP {http.request.remote.host}
+           header_up X-Real-IP {client_ip}
        }
    }
    ```
 
+   保存后检查配置。`caddy validate` 成功后再重新加载 Caddy，检查公开的 HTTPS 地址。
+
    ```sh
-   sudo caddy validate --config /etc/caddy/Caddyfile
+   sudo -u caddy caddy validate --config /etc/caddy/Caddyfile
    sudo systemctl reload caddy
    curl -fsS https://www.example.com/api/health
    ```
 
    `TRUST_PROXY=true` 只用于应用端口不公开、且反向代理会覆盖 `X-Real-IP` 的部署。否则设为 `false`，应用按实际连接地址限流。现有 Nginx 可以用 `proxy_set_header X-Real-IP $remote_addr;`，并保留原始 Host。
 
-部署后打开正式域名的 `/admin.html` 上架真实商品，按下方配置询盘发信。更新代码后重新执行 `npm ci --omit=dev`，再执行 `sudo systemctl restart apex-goods`。用 `journalctl -u apex-goods -n 100 --no-pager` 查启动和发信错误。
+使用 Cloudflare 时，按 [域名接入步骤](#cloudflare-domain) 配置 HTTPS 和访客 IP。手动部署后更新代码，在项目目录重新执行 `npm ci --omit=dev --ignore-scripts`，再执行 `sudo systemctl restart apex-goods`。
 
 ## Docker Compose 部署（可选）
 
@@ -144,7 +290,7 @@ docker compose logs --tail=100 web
 curl -fsS http://127.0.0.1:3000/api/health
 ```
 
-默认 `docker-compose.yml` 将 Web 端口绑定在主机的 `127.0.0.1:3000`，可直接使用上面的 Caddy 配置。容器将数据库保存在 `ecommerce_data` 卷内。修改 `.env` 后执行 `docker compose up -d --force-recreate web`，让容器读取新配置。更新代码用 `docker compose up -d --build`。
+默认 `docker-compose.yml` 将 Web 端口绑定在主机的 `127.0.0.1:3000`，可用 [手动部署中的第 3 步](#manual-linux-deploy) 配置主机上的 Caddy。容器将数据库保存在 `ecommerce_data` 卷内。修改 `.env` 后执行 `docker compose up -d --force-recreate web`，让容器读取新配置。更新代码用 `docker compose up -d --build`。
 
 如果已经使用 `docker-compose.prod.yml`，继续在命令中加 `-f docker-compose.prod.yml`，沿用原来的数据库卷和 Nginx。该文件里的 Nginx HTTPS 示例需要填入正式域名和证书路径。切换 Compose 文件会切换数据库卷，迁移前先备份。重启或更新时请保留数据库卷。
 
@@ -171,15 +317,9 @@ curl -fsS http://127.0.0.1:3000/api/health
 
 服务器能通过公网 IPv6 提供网站时，也可以为 `@` 添加 `AAAA` 记录。确认服务器防火墙和云平台安全组开放 `80` 和 `443`。
 
-更新 `.env`，将 `APP_ORIGIN` 设为 `https://www.example.com`，并保留 `TRUST_PROXY=true`。改完后按上面的部署方式重启应用，Compose 部署则重新创建 `web` 容器。登录和询盘提交都会校验请求来源，因此主地址要与 `APP_ORIGIN` 完全一致。
+在 `.env` 中将 `APP_ORIGIN` 设为正式地址 `https://www.example.com`，并保留 `TRUST_PROXY=true`。登录和询盘提交都会校验请求来源，因此主地址要与 `APP_ORIGIN` 完全一致。首次部署时，DNS 验证通过后回到部署教程启动网站。已有服务改了 `.env` 时按原部署方式重新加载。
 
-如果运行部署脚本时传了 `example.com`，它已经配置好根域名跳转。手动配置 Caddy 时，保留上面的 `www.example.com` 反向代理块，再加入下面的跳转。Caddy 会为这两个域名配置 HTTPS。
-
-```caddyfile
-example.com {
-    redir https://www.example.com{uri} permanent
-}
-```
+如果运行部署脚本时传了 `example.com`，它会配置根域名跳转。手动配置 Caddy 时，参考 [手动部署中的第 3 步](#manual-linux-deploy) 配置主站和跳转。
 
 ### 3. 配置访客 IP 和 HTTPS 代理
 
