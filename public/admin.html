@@ -106,13 +106,13 @@
           <span>APEX GOODS</span>
         </a>
         <span style="background: var(--primary-light); color: var(--primary); padding: 0.25rem 0.75rem; border-radius: var(--radius-full); font-size: 0.75rem; font-weight: 800; border: 1px solid rgba(217, 83, 40, 0.3);">
-          STORE MANAGER
+          ADMIN
         </span>
       </div>
 
       <div class="nav-links" style="margin-left: auto;">
         <a href="/" class="nav-link-btn">← Public Storefront</a>
-        <button id="nav-logout-btn" class="nav-link-btn" style="display: none; color: var(--danger); font-weight: 700;" onclick="handleLogout()">
+        <button id="nav-logout-btn" class="nav-link-btn" style="display: none; color: var(--danger); font-weight: 700;">
           🔒 Log Out
         </button>
       </div>
@@ -127,10 +127,10 @@
       </div>
       <h2 style="font-size: 1.6rem; font-weight: 900; color: var(--text-main); margin-bottom: 0.5rem;">Admin Verification</h2>
       <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.75rem; line-height: 1.5;">
-        Enter your store management password to access inventory, sales analytics, and fulfillment.
+        Sign in to manage the product catalog and customer inquiries.
       </p>
 
-      <form id="admin-login-form" onsubmit="event.preventDefault(); handleLogin(event); return false;">
+      <form id="admin-login-form" method="post" action="/api/admin/login">
         <div class="form-group" style="text-align: left;">
           <label class="form-label" for="admin-password-input">Admin Password</label>
           <input type="password" id="admin-password-input" class="form-control" placeholder="Enter admin password" autocomplete="current-password" required autofocus />
@@ -141,7 +141,8 @@
           <em>You can change this password anytime in the dashboard settings.</em>
         </div>
 
-        <div id="login-error-msg" style="display: none; color: var(--danger); font-size: 0.85rem; font-weight: 700; margin-bottom: 1rem;"></div>
+        <div id="login-status" role="status"></div>
+        <div id="login-error-msg" role="alert" style="display: none; color: var(--danger); font-size: 0.85rem; font-weight: 700; margin-bottom: 1rem;"></div>
 
         <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block" style="height: 48px; font-size: 0.95rem;">
           Unlock Store Manager →
@@ -154,17 +155,17 @@
   <main id="admin-dashboard-view" class="container" style="display: none; padding: 2.5rem 1.5rem 5rem; flex: 1;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
       <div>
-        <h1 style="font-size: 1.85rem; font-weight: 900; color: var(--text-main);">Store Maintenance & Management</h1>
+        <h1 style="font-size: 1.85rem; font-weight: 900; color: var(--text-main);">Site administration</h1>
         <p style="color: var(--text-muted); font-size: 0.95rem;">
-          Logged in as <strong id="admin-user-display" style="color: var(--primary);">admin</strong> • Full access to catalog, shelf controls, orders, and database.
+          Signed in as <strong id="admin-user-display" style="color: var(--primary);">admin</strong>
         </p>
       </div>
 
       <div style="display: flex; gap: 0.75rem;">
-        <button class="btn btn-secondary" onclick="openChangePasswordModal()">
+        <button class="btn btn-secondary" id="open-password-dialog" type="button">
           🔑 Change Password
         </button>
-        <button class="btn btn-primary" onclick="openAddProductModal()">
+        <button class="btn btn-primary" id="open-add-product" type="button">
           + Add New Product
         </button>
       </div>
@@ -172,14 +173,26 @@
 
     <!-- Navigation Tabs -->
     <div class="admin-nav">
-      <button class="admin-tab-btn active" data-tab="tab-overview">📊 Business Overview</button>
-      <button class="admin-tab-btn" data-tab="tab-inventory">🏷️ Catalog & Shelf Management</button>
-      <button class="admin-tab-btn" data-tab="tab-orders">📦 Customer Orders</button>
-      <button class="admin-tab-btn" data-tab="tab-system">🖥️ Database & Cloud Status</button>
+      <button class="admin-tab-btn active" data-tab="tab-inquiries">Inquiries</button>
+      <button class="admin-tab-btn" data-tab="tab-inventory">Product catalog</button>
+      <button class="admin-tab-btn" data-tab="tab-overview" hidden>Business overview</button>
+      <button class="admin-tab-btn" data-tab="tab-orders" hidden>Customer orders</button>
+      <button class="admin-tab-btn" data-tab="tab-system">System status</button>
     </div>
 
+    <section id="tab-inquiries" class="admin-tab-content card" aria-labelledby="inbox-title">
+      <div class="inbox-toolbar">
+        <h2 id="inbox-title">Inquiry inbox</h2>
+        <button class="btn btn-secondary btn-sm" id="inbox-refresh" type="button">Refresh</button>
+      </div>
+      <p id="inbox-email-state" class="contact-note" hidden>Email notifications are unconfigured. New messages will appear in this inbox.</p>
+      <p id="inbox-feedback" class="contact-note" role="status"></p>
+      <div id="inbox-list"></div>
+      <div class="inbox-pagination"><button class="btn btn-secondary btn-sm" id="inbox-prev" type="button" hidden>Newer inquiries</button><button class="btn btn-secondary btn-sm" id="inbox-next" type="button" hidden>Older inquiries</button></div>
+    </section>
+
     <!-- TAB 1: OVERVIEW -->
-    <div id="tab-overview" class="admin-tab-content">
+    <div id="tab-overview" class="admin-tab-content" style="display: none;">
       <div class="metrics-grid">
         <div class="metric-card">
           <div class="metric-card-title">Total Sales Revenue</div>
@@ -237,13 +250,13 @@
 
           <!-- Shelf Filter Controls -->
           <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <button class="catalog-filter-btn active" data-filter="all" onclick="setCatalogFilter('all')">
+            <button class="catalog-filter-btn active" data-filter="all">
               All (<span id="count-badge-total">0</span>)
             </button>
-            <button class="catalog-filter-btn" data-filter="active" onclick="setCatalogFilter('active')">
+            <button class="catalog-filter-btn" data-filter="active">
               ● On Shelf (<span id="count-badge-active">0</span>)
             </button>
-            <button class="catalog-filter-btn" data-filter="inactive" onclick="setCatalogFilter('inactive')">
+            <button class="catalog-filter-btn" data-filter="inactive">
               ○ Off Shelf (<span id="count-badge-inactive">0</span>)
             </button>
           </div>
@@ -367,38 +380,41 @@
   </main>
 
   <!-- CHANGE PASSWORD MODAL -->
-  <div class="modal-overlay" id="change-password-modal">
-    <div class="modal-dialog">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-        <h2 style="color: var(--text-main); font-size: 1.35rem; font-weight: 900;">Change Admin Password</h2>
-        <button onclick="closeChangePasswordModal()" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
-      </div>
-
-      <form onsubmit="handleChangePassword(event)">
+  <dialog class="modal-dialog" id="change-password-modal" aria-labelledby="password-dialog-title">
+      <h2 id="password-dialog-title" style="font-size: 1.35rem; margin-bottom: 1.25rem;">Change admin password</h2>
+      <form id="change-password-form" method="post" action="/api/admin/change-password">
         <div class="form-group">
-          <label class="form-label">New Password</label>
-          <input type="password" id="new-admin-password" class="form-control" required placeholder="Enter new strong password" minlength="12" autocomplete="new-password" />
+          <label class="form-label" for="current-admin-password">Current password</label>
+          <input type="password" id="current-admin-password" class="form-control" required maxlength="1024" autocomplete="current-password" autofocus />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="new-admin-password">New password</label>
+          <input type="password" id="new-admin-password" class="form-control" required minlength="12" maxlength="1024" autocomplete="new-password" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="confirm-admin-password">Confirm new password</label>
+          <input type="password" id="confirm-admin-password" class="form-control" required maxlength="1024" autocomplete="new-password" />
         </div>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem;">
-          Use at least 12 characters. Other signed-in sessions will be logged out.
+          Use at least 12 characters. You’ll sign in again after saving.
         </p>
+        <p id="password-change-error" class="contact-error" role="alert" hidden></p>
         <div style="display: flex; justify-content: flex-end; gap: 1rem;">
-          <button type="button" class="btn btn-secondary" onclick="closeChangePasswordModal()">Cancel</button>
+          <button type="button" class="btn btn-secondary" id="cancel-password-change">Cancel</button>
           <button type="submit" class="btn btn-primary">Update Password</button>
         </div>
       </form>
-    </div>
-  </div>
+  </dialog>
 
   <!-- ADD PRODUCT MODAL -->
   <div class="modal-overlay" id="add-product-modal">
     <div class="modal-dialog">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
         <h2 style="color: var(--text-main); font-size: 1.35rem; font-weight: 900;">Add New Product to Store</h2>
-        <button onclick="closeAddProductModal()" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
+        <button type="button" data-close-product-modal="add" aria-label="Close" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
       </div>
 
-      <form onsubmit="handleAddProduct(event)">
+      <form id="add-product-form" method="post" action="/api/admin/products">
         <div class="form-group">
           <label class="form-label">Product Title *</label>
           <input type="text" name="name" class="form-control" required placeholder="e.g. Studio Monitor Stand (Pair)" />
@@ -448,7 +464,7 @@
         </div>
 
         <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
-          <button type="button" class="btn btn-secondary" onclick="closeAddProductModal()">Cancel</button>
+          <button type="button" class="btn btn-secondary" data-close-product-modal="add">Cancel</button>
           <button type="submit" class="btn btn-primary">Publish to Store</button>
         </div>
       </form>
@@ -460,10 +476,10 @@
     <div class="modal-dialog">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
         <h2 style="color: var(--text-main); font-size: 1.35rem; font-weight: 900;">Edit Product Details</h2>
-        <button onclick="closeEditProductModal()" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
+        <button type="button" data-close-product-modal="edit" aria-label="Close" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
       </div>
 
-      <form id="edit-product-form" onsubmit="handleEditProduct(event)">
+      <form id="edit-product-form" method="post">
         <input type="hidden" name="productId" />
 
         <div class="form-group">
@@ -515,7 +531,7 @@
         </div>
 
         <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
-          <button type="button" class="btn btn-secondary" onclick="closeEditProductModal()">Cancel</button>
+          <button type="button" class="btn btn-secondary" data-close-product-modal="edit">Cancel</button>
           <button type="submit" class="btn btn-primary">Save Changes</button>
         </div>
       </form>
@@ -531,7 +547,7 @@
   </footer>
 
   <script src="/js/api.js?v=auth_v4"></script>
-  <script src="/js/cart.js?v=auth_v4"></script>
+  <script src="/js/admin-inquiries.js"></script>
   <script src="/js/admin.js?v=auth_v4"></script>
 </body>
 </html>

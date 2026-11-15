@@ -17,7 +17,8 @@ ENV PORT=3000
 ENV HOST=0.0.0.0
 
 # Copy application manifest and source code
-COPY package.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 COPY src/ ./src/
 COPY public/ ./public/
 

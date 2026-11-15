@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # ============================================================
 # Automated Database Backup & Cloud Sync Script
-# Runs daily via Cron to ensure zero data loss
+# Creates a consistent SQLite snapshot before compression.
 # Supports AWS S3 and OCI Object Storage
 # ============================================================
 
 set -euo pipefail
+umask 077
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$APP_DIR"
 
-BACKUP_DIR="${HOME}/backups"
+BACKUP_DIR="${BACKUP_DIR:-${HOME}/backups}"
 TIMESTAMP="$(date +"%Y%m%d_%H%M%S")"
-CONTAINER_NAME="ecommerce_app"
 BACKUP_FILE="${BACKUP_DIR}/ecommerce_db_${TIMESTAMP}.sqlite.gz"
 RETENTION_DAYS=14
 
@@ -19,19 +21,36 @@ echo "========================================================"
 echo " Starting Database Backup: $(date)"
 echo "========================================================"
 
-# 1. Safely extract SQLite database using SQLite WAL-safe dump or file copy
-if docker ps | grep -q "$CONTAINER_NAME"; then
-    echo "Creating compressed backup from running Docker container..."
-    docker exec "$CONTAINER_NAME" /bin/sh -c "cat /app/data/ecommerce.db" | gzip -c > "$BACKUP_FILE"
-    echo "Backup saved to: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
-elif [ -f "./data/ecommerce.db" ]; then
-    echo "Backing up local database file..."
-    gzip -c "./data/ecommerce.db" > "$BACKUP_FILE"
-    echo "Backup saved to: $BACKUP_FILE"
-else
-    echo "ERROR: Neither container '$CONTAINER_NAME' nor local database found."
-    exit 1
+# 1. Snapshot the database using SQLite, including writes in the WAL.
+TEMP_DIR="$(mktemp -d "${BACKUP_DIR}/.snapshot.XXXXXX")"
+CONTAINER_NAME="${BACKUP_CONTAINER:-}"
+CONTAINER_SNAPSHOT=""
+cleanup() {
+    if [ -n "$CONTAINER_SNAPSHOT" ]; then
+        docker exec "$CONTAINER_NAME" rm -f "$CONTAINER_SNAPSHOT" >/dev/null 2>&1 || true
+    fi
+    rm -f -- "$TEMP_DIR/backup.db" "$TEMP_DIR/backup.gz"
+    rmdir -- "$TEMP_DIR"
+}
+trap cleanup EXIT
+if [ -z "$CONTAINER_NAME" ] && command -v docker >/dev/null; then
+    for candidate in ecommerce_app ecommerce_web; do
+        if [ "$(docker inspect -f '{{.State.Running}}' "$candidate" 2>/dev/null || true)" = true ]; then
+            CONTAINER_NAME="$candidate"
+            break
+        fi
+    done
 fi
+if [ -n "$CONTAINER_NAME" ]; then
+    CONTAINER_SNAPSHOT="/tmp/apex-$(basename "$TEMP_DIR").db"
+    docker exec "$CONTAINER_NAME" node src/backup-db.js "$CONTAINER_SNAPSHOT"
+    docker cp "$CONTAINER_NAME:$CONTAINER_SNAPSHOT" "$TEMP_DIR/backup.db"
+else
+    node src/backup-db.js "$TEMP_DIR/backup.db"
+fi
+gzip -c "$TEMP_DIR/backup.db" > "$TEMP_DIR/backup.gz"
+mv -- "$TEMP_DIR/backup.gz" "$BACKUP_FILE"
+echo "Backup saved to: $BACKUP_FILE"
 
 # 2. Upload to Cloud Object Storage (if configured)
 

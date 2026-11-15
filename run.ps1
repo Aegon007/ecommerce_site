@@ -20,7 +20,6 @@ $portText = & $nodeExecutable -e "require('./src/config'); console.log(process.e
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $storeUrl = "http://localhost:$($portText.Trim())"
 Write-Host "Apex Goods - $storeUrl" -ForegroundColor Green
-Write-Host 'Demo checkout only. No payments will be taken.' -ForegroundColor Yellow
 $browserJob = Start-Job -ArgumentList $storeUrl -ScriptBlock {
     param($url)
     for ($attempt = 0; $attempt -lt 15; $attempt++) {

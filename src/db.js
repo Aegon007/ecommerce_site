@@ -48,6 +48,28 @@ function verifyPassword(password, stored) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
+function validAdminPassword(password) {
+  return typeof password === 'string' && password.trim().length >= 12 && password.length <= 1024 && !/[\r\n]/.test(password);
+}
+
+function setAdminPassword(username, password) {
+  if (!validAdminPassword(password)) {
+    throw new Error('Use a password with 12–1024 characters');
+  }
+  const passwordHash = hashPassword(password);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = db.prepare('UPDATE admin_users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE username = ?')
+      .run(passwordHash, username);
+    if (!result.changes) throw new Error('Administrator not found');
+    db.prepare('DELETE FROM admin_sessions WHERE username = ?').run(username);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 /**
  * Initialize Tables Schema
  */
@@ -132,6 +154,23 @@ function initSchema() {
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS inquiries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      submission_key TEXT UNIQUE,
+      request_hash TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      company TEXT NOT NULL,
+      product_slug TEXT,
+      product_name TEXT,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'handled')),
+      email_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (email_status IN ('pending', 'sending', 'sent', 'failed', 'not_configured')),
+      last_email_attempt INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS admin_users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
@@ -168,13 +207,14 @@ function initSchema() {
     if (!columns.has(name)) db.exec(`ALTER TABLE orders ADD COLUMN ${name} TEXT`);
   }
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_checkout_key ON orders(checkout_key)');
+  db.exec("DELETE FROM admin_sessions WHERE token NOT LIKE 'sha256:%'");
 
   // ADMIN_PASSWORD only initializes a new database; it never resets a changed password.
   const adminUser = db.prepare('SELECT id FROM admin_users WHERE username = ?').get('admin');
   const initialPassword = process.env.ADMIN_PASSWORD || '123';
   if (!adminUser) {
-    if (process.env.NODE_ENV === 'production' && (initialPassword === '123' || initialPassword.length < 12)) {
-      throw new Error('Set ADMIN_PASSWORD to at least 12 characters before initializing a production database');
+    if (process.env.NODE_ENV === 'production' && !validAdminPassword(initialPassword)) {
+      throw new Error('Set ADMIN_PASSWORD to a single-line password with 12–1024 characters before initializing a production database');
     }
     db.prepare('INSERT INTO admin_users (username, password_hash, role) VALUES (?, ?, ?)')
       .run('admin', hashPassword(initialPassword), 'superadmin');
@@ -190,6 +230,8 @@ module.exports = {
   initSchema,
   hashPassword,
   verifyPassword,
+  validAdminPassword,
+  setAdminPassword,
   queryAll(sql, params = []) {
     const stmt = db.prepare(sql);
     return stmt.all(...params);

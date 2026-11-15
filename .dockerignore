@@ -1,0 +1,9 @@
+.git
+.env*
+.qa
+.backups
+backups
+data
+node_modules
+*.db*
+*.sqlite*

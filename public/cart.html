@@ -67,9 +67,9 @@
           <!-- Promo Code Input -->
           <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
             <input type="text" id="coupon-input" aria-label="Promo code" class="form-control" placeholder="Promo code" style="text-transform: uppercase;" />
-            <button class="btn btn-secondary" id="apply-coupon" onclick="applyCouponCode()">Apply</button>
+            <button class="btn btn-secondary" id="apply-coupon" type="button">Apply</button>
           </div>
-          <button type="button" class="text-button" id="remove-coupon" hidden onclick="Cart.setCoupon(null); document.getElementById('coupon-input').value = '';">Remove promo code</button><div id="coupon-alert" style="margin-bottom: 1rem; font-size: 0.85rem; display: none; font-weight: 600;"></div>
+          <button type="button" class="text-button" id="remove-coupon" hidden>Remove promo code</button><div id="coupon-alert" style="margin-bottom: 1rem; font-size: 0.85rem; display: none; font-weight: 600;"></div>
 
           <!-- Summary Breakdown -->
           <div class="summary-row">
@@ -97,7 +97,7 @@
             <span id="summary-total">$0.00</span>
           </div>
 
-          <p id="checkout-error" role="alert" class="checkout-error"></p><button disabled id="btn-open-checkout" class="btn btn-primary btn-block" style="margin-top: 1.5rem; height: 50px; font-size: 1rem;" onclick="openCheckoutModal()">
+          <p id="checkout-error" role="alert" class="checkout-error"></p><button disabled id="btn-open-checkout" class="btn btn-primary btn-block" style="margin-top: 1.5rem; height: 50px; font-size: 1rem;">
             Proceed to Checkout →
           </button>
 
@@ -126,10 +126,10 @@
     <div class="modal-dialog">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
         <h2 style="color: var(--text-main); font-size: 1.4rem; font-weight: 900;">Checkout</h2>
-        <button type="button" aria-label="Close checkout" onclick="closeCheckoutModal()" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
+        <button type="button" id="btn-close-checkout" aria-label="Close checkout" style="color: var(--text-muted); font-size: 1.5rem; font-weight: 700;">×</button>
       </div>
 
-      <form id="checkout-form" onsubmit="submitOrder(event)">
+      <form id="checkout-form" method="post" action="/api/orders">
         <!-- Step 1: Customer Info -->
         <h3 style="font-size: 0.95rem; font-weight: 800; color: var(--primary); text-transform: uppercase; margin-bottom: 0.75rem; letter-spacing: 0.5px;">
           1. Customer Contact

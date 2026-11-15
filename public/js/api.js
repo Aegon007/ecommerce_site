@@ -1,25 +1,14 @@
 /**
  * Apex Goods Co. - API Client & Notification Engine
- * Automatically attaches Admin Auth token when available
+ * Same-origin requests use the browser's admin session cookie.
  */
 
 const API = {
   baseUrl: '',
 
-  getAuthHeaders() {
-    const token = sessionStorage.getItem('apex_admin_token') || localStorage.getItem('apex_admin_token');
-    const headers = { 'Content-Type': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    return headers;
-  },
-
   async get(endpoint) {
     try {
-      const res = await fetch(`${this.baseUrl}${endpoint}`, {
-        headers: this.getAuthHeaders()
-      });
+      const res = await fetch(`${this.baseUrl}${endpoint}`);
       if (res.status === 401 && endpoint.startsWith('/api/admin/') && !endpoint.includes('/api/admin/login')) {
         window.dispatchEvent(new CustomEvent('admin-auth-required'));
       }
@@ -38,7 +27,7 @@ const API = {
     try {
       const res = await fetch(`${this.baseUrl}${endpoint}`, {
         method: 'POST',
-        headers: this.getAuthHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
       if (res.status === 401 && endpoint.startsWith('/api/admin/') && !endpoint.includes('/api/admin/login')) {
@@ -59,7 +48,7 @@ const API = {
     try {
       const res = await fetch(`${this.baseUrl}${endpoint}`, {
         method: 'PUT',
-        headers: this.getAuthHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
       if (res.status === 401 && endpoint.startsWith('/api/admin/')) {
@@ -80,7 +69,7 @@ const API = {
     try {
       const res = await fetch(`${this.baseUrl}${endpoint}`, {
         method: 'PATCH',
-        headers: this.getAuthHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
       if (res.status === 401 && endpoint.startsWith('/api/admin/')) {
@@ -100,8 +89,7 @@ const API = {
   async delete(endpoint) {
     try {
       const res = await fetch(`${this.baseUrl}${endpoint}`, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders()
+        method: 'DELETE'
       });
       if (res.status === 401 && endpoint.startsWith('/api/admin/')) {
         window.dispatchEvent(new CustomEvent('admin-auth-required'));

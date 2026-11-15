@@ -7,8 +7,11 @@ const vm = require('node:vm');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-regression-'));
 process.env.DB_PATH = path.join(directory, 'test.db');
 process.env.NODE_ENV = 'test';
+process.env.APP_ORIGIN = '';
+process.env.TRUST_PROXY = 'false';
 process.env.ADMIN_PASSWORD = 'test-bootstrap-password';
 process.env.PAYMENT_MODE = 'mock';
+process.env.ENABLE_DEMO_CHECKOUT = 'true';
 process.env.SEED_DEMO_DATA = 'true';
 // Deliberately differ from the frontend's old hard-coded defaults.
 process.env.TAX_RATE = '0.075';
@@ -16,12 +19,12 @@ process.env.FREE_SHIPPING_THRESHOLD = '100';
 process.env.STANDARD_SHIPPING_FEE = '4.95';
 const { server } = require('../src/server');
 const { db, queryOne, run, initSchema, hashPassword } = require('../src/db');
-let base, token, product;
+let base, adminCookie, product;
 before(async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
   const login = await request('/api/admin/login', 'POST', { password: process.env.ADMIN_PASSWORD });
-  token = login.data.token;
+  adminCookie = login.headers.get('set-cookie').split(';')[0];
   const result = await request('/api/admin/products', 'POST', { name: 'Test "quoted" product', category: 'Audio & Sound', price: 19.99, compare_at_price: 30, stock: 4, description: '<script>alert(1)</script>', image_url: '/images/product-placeholder.svg' }, true);
   assert.equal(result.status, 201);
   product = result.data;
@@ -32,8 +35,8 @@ after(async () => {
   fs.rmSync(directory, { recursive: true, force: true });
 });
 async function request(endpoint, method = 'GET', body, admin = false, headers = {}) {
-  const response = await fetch(base + endpoint, { method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(admin ? { Authorization: `Bearer ${token}` } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
-  return { status: response.status, data: await response.json() };
+  const response = await fetch(base + endpoint, { method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(method !== 'GET' ? { Origin: base } : {}), ...(admin ? { Cookie: adminCookie } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: response.status, data: await response.json(), headers: response.headers };
 }
 const order = items => ({ customer: { name: '<img src=x onerror=alert(1)>', email: 'buyer@example.com' }, shipping: { address: '1 Test Street', city: 'Testville', state: 'IL', postal_code: '60000', country: 'United States' }, items });
 
@@ -131,15 +134,52 @@ test('admin metrics execute valid SQLite SQL and omit mock revenue', async () =>
   const result = await request('/api/admin/metrics', 'GET', undefined, true);
   assert.equal(result.status, 200); assert.equal(result.data.metrics.total_revenue, 0);
 });
-test('changing password disables old passwords, revokes other sessions and survives initialization', async () => {
-  const other = (await request('/api/admin/login', 'POST', { password: process.env.ADMIN_PASSWORD })).data.token;
-  assert.equal((await request('/api/admin/change-password', 'POST', { newPassword: '123' }, true)).status, 400);
-  assert.equal((await request('/api/admin/change-password', 'POST', { newPassword: 'a-new-secure-test-password' }, true)).status, 200);
+test('changing password requires current credentials, revokes all sessions and survives initialization', async () => {
+  const login = await request('/api/admin/login', 'POST', { password: process.env.ADMIN_PASSWORD });
+  const setCookie = login.headers.get('set-cookie');
+  const other = setCookie.split(';')[0];
+  assert.match(setCookie, /HttpOnly; SameSite=Strict; Max-Age=28800/);
+  assert.equal(login.data.token, undefined);
+  assert(queryOne('SELECT token FROM admin_sessions LIMIT 1').token.startsWith('sha256:'));
+  assert.equal((await request('/api/admin/verify', 'GET', undefined, false, { Cookie: other })).status, 200);
+  const changes = { currentPassword: process.env.ADMIN_PASSWORD, newPassword: 'a-new-secure-test-password' };
+  assert.equal((await request('/api/admin/change-password', 'POST', changes)).status, 401);
+  assert.equal((await request('/api/admin/change-password', 'POST', { newPassword: changes.newPassword }, true)).status, 400);
+  assert.equal((await request('/api/admin/change-password', 'POST', { ...changes, newPassword: '123' }, true)).status, 400);
+  assert.equal((await request('/api/admin/change-password', 'POST', { ...changes, currentPassword: 'incorrect' }, true)).status, 403);
+  assert.equal((await request('/api/admin/change-password', 'POST', changes, true, { Origin: base.replace('http:', 'https:') })).status, 403);
+  const changed = await request('/api/admin/change-password', 'POST', changes, true);
+  assert.equal(changed.status, 200);
+  assert.match(changed.headers.get('set-cookie'), /Max-Age=0/);
   initSchema();
   for (const password of ['123', process.env.ADMIN_PASSWORD]) assert.equal((await request('/api/admin/login', 'POST', { password })).status, 401);
-  assert.equal((await request('/api/admin/login', 'POST', { password: 'a-new-secure-test-password' })).status, 200);
-  assert.equal((await request('/api/admin/verify', 'GET', undefined, false, { Authorization: `Bearer ${other}` })).status, 401);
+  const current = await request('/api/admin/login', 'POST', { password: changes.newPassword });
+  assert.equal(current.status, 200);
+  for (const Cookie of [adminCookie, other]) assert.equal((await request('/api/admin/verify', 'GET', undefined, false, { Cookie })).status, 401);
+  adminCookie = current.headers.get('set-cookie').split(';')[0];
   assert.notEqual(hashPassword('same-password'), hashPassword('same-password'));
+});
+test('SQL metacharacters are treated as data and admin mutations require the site origin', async () => {
+  const attack = "' OR 1=1 --";
+  const params = new URLSearchParams({ category: attack, search: attack, sortBy: 'price; DROP TABLE products' });
+  const products = await request(`/api/products?${params}`);
+  assert.equal(products.status, 200);
+  assert.equal(products.data.total, 0);
+  assert.equal((await request('/api/products?search=%25')).data.products.some(item => !`${item.name} ${item.description} ${item.category}`.includes('%')), false);
+  const login = await request('/api/admin/login', 'POST', { username: `admin${attack}`, password: 'a-new-secure-test-password' });
+  assert.equal(login.status, 401);
+  assert.equal(login.headers.get('set-cookie'), null);
+  const changed = await request(`/api/admin/products/${product.id}`, 'PUT', {
+    description: attack, 'stock = 0; --': 99
+  }, true);
+  assert.equal(changed.status, 200);
+  assert.equal(changed.data.product.description, attack);
+  assert.equal(changed.data.product.stock, 20);
+  const crossOrigin = await fetch(`${base}/api/admin/products/${product.id}`, {
+    method: 'DELETE', headers: { Cookie: adminCookie }
+  });
+  assert.equal(crossOrigin.status, 403);
+  assert.equal((await request(`/api/products/${product.id}`)).status, 200);
 });
 test('static routes, filters, and unsupported payment intent respond honestly', async () => {
   for (const url of ['/', '/cart.html', '/product.html', '/order-confirmation.html', '/admin.html', '/js/checkout.js']) assert.equal((await fetch(base + url)).status, 200);
@@ -147,6 +187,10 @@ test('static routes, filters, and unsupported payment intent respond honestly', 
   assert.equal((await request('/api/products?sortBy=__proto__')).status, 200);
   assert.equal((await request('/api/payments/create-intent', 'POST', { amount: 10 })).status, 501);
   assert.equal((await request('/api/orders', 'POST', order([{ id: product.id, quantity: 1 }]), false, { Origin: 'https://untrusted.example' })).status, 403);
+  const admin = await fetch(base + '/admin.html');
+  assert.match(admin.headers.get('content-security-policy'), /script-src 'self';/);
+  assert.equal(admin.headers.get('x-frame-options'), 'DENY');
+  assert.equal((await fetch(base + '/%2e%2e%2fpackage.json')).status, 403);
 });
 test('browser cart handles corrupted storage, stock limits, cents and cross-tab changes', () => {
   const values = new Map(); const listeners = {}; const events = [];

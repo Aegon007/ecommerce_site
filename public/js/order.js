@@ -21,15 +21,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (number) {
     input.value = number;
     const token = sessionStorage.getItem(`apex_order_${number}`);
-    const admin = sessionStorage.getItem('apex_admin_token') || localStorage.getItem('apex_admin_token');
-    if (token || admin) {
-      try {
-        const response = await fetch(`/api/orders/${encodeURIComponent(number)}`, { headers: token ? { 'X-Order-Token': token } : API.getAuthHeaders() });
-        const result = await response.json();
-        if (response.ok) renderOrder(result.order);
-        else message.textContent = 'Enter your checkout email to view this order.';
-      } catch { message.textContent = 'Could not load this order. Please try the lookup form.'; }
-    } else message.textContent = 'Enter your checkout email to view this order.';
+    try {
+      const response = await fetch(`/api/orders/${encodeURIComponent(number)}`, { headers: token ? { 'X-Order-Token': token } : {} });
+      const result = await response.json();
+      if (response.ok) renderOrder(result.order);
+      else message.textContent = 'Enter your checkout email to view this order.';
+    } catch { message.textContent = 'Could not load this order. Please try the lookup form.'; }
   }
   document.getElementById('tracking-form').addEventListener('submit', async event => {
     event.preventDefault();

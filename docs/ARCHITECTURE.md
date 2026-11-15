@@ -31,13 +31,13 @@ An order body includes `customer: {name, email, phone?}`, `shipping: {address, c
 
 ## Admin API
 
-`POST /api/admin/login` accepts username (defaults to `admin`) and password. All other admin routes require a valid `Authorization: Bearer <token>` session.
+`POST /api/admin/login` accepts username (defaults to `admin`) and password and sets an eight-hour `HttpOnly`, `SameSite=Strict` session cookie. Production cookies require HTTPS. Other admin routes require that cookie, and admin writes require the exact site `Origin`.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
 | GET | `/api/admin/verify` | Verify session |
 | POST | `/api/admin/logout` | Revoke session |
-| POST | `/api/admin/change-password` | Set a 12+ character password and revoke other sessions |
+| POST | `/api/admin/change-password` | Verify the current password, set a new password, and revoke all sessions |
 | GET | `/api/admin/metrics` | Paid revenue, order counts, low stock, recent orders |
 | GET | `/api/admin/database-info` | Database facts and row counts |
 | GET | `/api/admin/products` | All products, including off-shelf |

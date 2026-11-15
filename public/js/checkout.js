@@ -19,12 +19,12 @@ function renderCart() {
         ${item.available === false || item.stock === 0 ? '<span class="checkout-error">Currently unavailable. Please remove this item.</span>' : item.quantity > item.stock ? `<span class="checkout-error">Only ${item.stock} available. Reduce the quantity.</span>` : ''}
       </div>
       <div class="qty-control">
-        <button class="qty-btn" aria-label="Decrease quantity of ${escapeHTML(item.name)}" onclick="Cart.updateQuantity(${item.id}, ${item.quantity - 1})">−</button>
+        <button class="qty-btn" aria-label="Decrease quantity of ${escapeHTML(item.name)}" data-cart-id="${item.id}" data-quantity="${item.quantity - 1}">−</button>
         <span class="qty-num">${item.quantity}</span>
-        <button class="qty-btn" aria-label="Increase quantity of ${escapeHTML(item.name)}" ${item.quantity >= Math.min(item.stock, 99) ? 'disabled' : ''} onclick="Cart.updateQuantity(${item.id}, ${item.quantity + 1})">+</button>
+        <button class="qty-btn" aria-label="Increase quantity of ${escapeHTML(item.name)}" ${item.quantity >= Math.min(item.stock, 99) ? 'disabled' : ''} data-cart-id="${item.id}" data-quantity="${item.quantity + 1}">+</button>
       </div>
       <div class="cart-line-total">${formatMoney(item.price * item.quantity)}</div>
-      <button class="remove-item" aria-label="Remove ${escapeHTML(item.name)}" onclick="Cart.removeItem(${item.id})">×</button>
+      <button class="remove-item" aria-label="Remove ${escapeHTML(item.name)}" data-cart-id="${item.id}">×</button>
     </div>`).join('');
   latestQuote = null;
   document.getElementById('btn-open-checkout').disabled = true;
@@ -132,6 +132,21 @@ async function submitOrder(event) {
   finally { checkoutBusy = false; button.disabled = false; button.textContent = 'Place Demo Order'; }
 }
 document.addEventListener('DOMContentLoaded', async () => {
+  document.getElementById('apply-coupon').addEventListener('click', applyCouponCode);
+  document.getElementById('remove-coupon').addEventListener('click', () => {
+    Cart.setCoupon(null);
+    document.getElementById('coupon-input').value = '';
+  });
+  document.getElementById('btn-open-checkout').addEventListener('click', openCheckoutModal);
+  document.getElementById('btn-close-checkout').addEventListener('click', closeCheckoutModal);
+  document.getElementById('checkout-form').addEventListener('submit', submitOrder);
+  document.getElementById('cart-items-container').addEventListener('click', event => {
+    const button = event.target.closest('[data-cart-id]');
+    if (!button) return;
+    const id = Number(button.dataset.cartId);
+    if (button.hasAttribute('data-quantity')) Cart.updateQuantity(id, Number(button.dataset.quantity));
+    else Cart.removeItem(id);
+  });
   renderCart();
   document.getElementById('coupon-input').value = Cart.getCoupon()?.code || '';
   document.getElementById('checkout-modal').addEventListener('click', event => { if (event.target.id === 'checkout-modal') closeCheckoutModal(); });

@@ -1,7 +1,7 @@
 {
   "name": "modern-ecommerce-platform",
   "version": "1.1.0",
-  "description": "Apex Goods storefront and store manager with SQLite and demo checkout",
+  "description": "Apex Goods product catalog and inquiry management",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
@@ -21,6 +21,9 @@
   ],
   "author": "",
   "license": "MIT",
+  "dependencies": {
+    "nodemailer": "10.5.0"
+  },
   "engines": {
     "node": ">=22.13.0"
   }

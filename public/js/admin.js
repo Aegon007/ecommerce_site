@@ -1,6 +1,6 @@
 /**
  * Apex Goods Co. - Merchant Operations & Admin Dashboard Logic
- * Easy store maintenance: Password Protection (initial: 123), Catalog, Orders, Database Info
+ * Catalog, inquiries, orders and admin sign-in.
  */
 
 let adminMetrics = {};
@@ -10,17 +10,10 @@ let catalogFilter = 'all'; // 'all', 'active', 'inactive'
 let isAuthenticated = false;
 
 async function checkAuthAndInit() {
-  const token = sessionStorage.getItem('apex_admin_token') || localStorage.getItem('apex_admin_token');
-
-  if (!token) {
-    showLoginView();
-    return;
-  }
-
   try {
-    const res = await API.get('/api/admin/verify');
-    if (res && res.authenticated) {
-      isAuthenticated = true;
+    const response = await fetch('/api/admin/verify');
+    if (response.ok) {
+      const res = await response.json();
       showDashboardView(res.username);
       try {
         await initDashboardData();
@@ -31,20 +24,23 @@ async function checkAuthAndInit() {
       showLoginView();
     }
   } catch (err) {
-    sessionStorage.removeItem('apex_admin_token');
-    localStorage.removeItem('apex_admin_token');
     showLoginView();
   }
 }
 
 function showLoginView() {
   isAuthenticated = false;
+  closeChangePasswordModal();
+  closeAddProductModal();
+  closeEditProductModal();
+  resetInquiryInbox();
   const loginView = document.getElementById('admin-login-view');
   const dashView = document.getElementById('admin-dashboard-view');
   const logoutBtn = document.getElementById('nav-logout-btn');
   if (loginView) loginView.style.display = 'flex';
   if (dashView) dashView.style.display = 'none';
   if (logoutBtn) logoutBtn.style.display = 'none';
+  document.getElementById('admin-login-form').reset();
 }
 
 function showDashboardView(username = 'Admin') {
@@ -83,12 +79,12 @@ async function handleLogin(e) {
     submitBtn.textContent = 'Verifying...';
   }
   if (errorMsg) errorMsg.style.display = 'none';
+  document.getElementById('login-status').textContent = '';
 
   try {
     const res = await API.post('/api/admin/login', { username: 'admin', password });
-    if (res && res.token) {
-      sessionStorage.setItem('apex_admin_token', res.token);
-      localStorage.removeItem('apex_admin_token');
+    if (res.success) {
+      passwordInput.value = '';
       showToast('Welcome back, Admin!', 'success');
       showDashboardView(res.username);
       try {
@@ -114,21 +110,24 @@ async function handleLogin(e) {
 async function handleLogout() {
   try {
     await API.post('/api/admin/logout', {});
-  } catch (e) {}
-
-  sessionStorage.removeItem('apex_admin_token');
-  localStorage.removeItem('apex_admin_token');
+  } catch {
+    showToast('Could not sign out. Please try again.', 'error');
+    return;
+  }
   showToast('You have been logged out.', 'info');
   showLoginView();
 }
 
 async function initDashboardData() {
-  await loadMetrics();
-  await loadOrders();
-  await loadAdminProducts();
-  await loadDatabaseInfo();
-  await loadHealth();
   setupAdminTabs();
+  document.querySelector('[data-tab="tab-inquiries"]').click();
+  const config = await API.get('/api/store-config').catch(() => ({}));
+  for (const id of ['tab-overview', 'tab-orders']) {
+    document.querySelector(`[data-tab="${id}"]`).hidden = !config.salesEnabled;
+  }
+  const tasks = [loadInquiryInbox(), loadAdminProducts(), loadDatabaseInfo(), loadHealth()];
+  if (config.salesEnabled) tasks.push(loadMetrics(), loadOrders());
+  await Promise.all(tasks);
 }
 
 function setupAdminTabs() {
@@ -177,7 +176,7 @@ async function loadMetrics() {
             <td>${formatMoney(p.price)}</td>
             <td><span class="stock-status stock-low">⚠️ ${p.stock} units left</span></td>
             <td>
-              <button class="btn btn-secondary btn-sm" onclick="quickRestock(${p.id}, ${p.stock})">
+              <button class="btn btn-secondary btn-sm" data-restock-id="${p.id}" data-stock="${p.stock}">
                 + Restock (+20)
               </button>
             </td>
@@ -230,7 +229,7 @@ async function loadOrders() {
           <td style="font-size: 0.85rem; color: var(--text-muted);">${dateStr}</td>
           <td><strong style="color: var(--text-main); font-weight: 700;">${formatMoney(o.total)}</strong></td>
           <td>
-            <select class="form-control" style="padding: 0.35rem 0.65rem; font-size: 0.825rem; font-weight: 700; width: auto; ${statusColors[o.status] || ''}" onchange="changeOrderStatus(${o.id}, this.value)">
+            <select class="form-control" style="padding: 0.35rem 0.65rem; font-size: 0.825rem; font-weight: 700; width: auto; ${statusColors[o.status] || ''}" data-order-id="${o.id}">
               <option value="pending" ${o.status === 'pending' ? 'selected' : ''}>Pending</option>
               <option value="processing" ${o.status === 'processing' ? 'selected' : ''}>Processing</option>
               <option value="shipped" ${o.status === 'shipped' ? 'selected' : ''}>Shipped</option>
@@ -239,7 +238,7 @@ async function loadOrders() {
             </select>
           </td>
           <td>
-            ${o.tracking_number ? `<code style="color: var(--primary); font-weight: 700;">${escapeHTML(o.tracking_number)}</code>` : `<button class="btn btn-secondary btn-sm" onclick="promptAddTracking(${o.id})">+ Add Tracking</button>`}
+            ${o.tracking_number ? `<code style="color: var(--primary); font-weight: 700;">${escapeHTML(o.tracking_number)}</code>` : `<button class="btn btn-secondary btn-sm" data-tracking-id="${o.id}">+ Add Tracking</button>`}
           </td>
           <td>
             <a href="/order-confirmation.html?order=${escapeHTML(o.order_number)}" target="_blank" class="btn btn-secondary btn-sm">Receipt ↗</a>
@@ -354,7 +353,7 @@ function renderCatalogTable() {
           ${p.compare_at_price ? `<div style="font-size: 0.75rem; text-decoration: line-through; color: var(--text-subtle);">${formatMoney(p.compare_at_price)}</div>` : ''}
         </td>
         <td>
-          <input type="number" value="${p.stock}" style="width: 75px; padding: 0.3rem 0.5rem; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); border-radius: var(--radius-sm); font-weight: 700;" onchange="updateProductStock(${p.id}, this.value)" />
+          <input type="number" value="${p.stock}" style="width: 75px; padding: 0.3rem 0.5rem; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); border-radius: var(--radius-sm); font-weight: 700;" data-stock-id="${p.id}" />
         </td>
         <td>
           ${isOnShelf
@@ -365,17 +364,17 @@ function renderCatalogTable() {
         <td>
           <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
             <!-- 1-Click Toggle On/Off Shelf -->
-            <button class="btn ${isOnShelf ? 'btn-secondary' : 'btn-accent'} btn-sm" onclick="toggleShelfStatus(${p.id})" title="${isOnShelf ? 'Hide from storefront' : 'Make visible in store'}">
+            <button class="btn ${isOnShelf ? 'btn-secondary' : 'btn-accent'} btn-sm" data-product-id="${p.id}" data-product-action="toggle" title="${isOnShelf ? 'Hide from storefront' : 'Make visible in store'}">
               ${isOnShelf ? '🛑 Take Off Shelf' : '✅ Put On Shelf'}
             </button>
 
             <!-- Edit Details Button -->
-            <button class="btn btn-secondary btn-sm" onclick="openEditProductModal(${p.id})">
+            <button class="btn btn-secondary btn-sm" data-product-id="${p.id}" data-product-action="edit">
               ✏️ Edit
             </button>
 
             <!-- Delete Button -->
-            <button class="btn btn-secondary btn-sm" style="color: var(--danger);" onclick="deleteProduct(${p.id})" title="Delete Product">
+            <button class="btn btn-secondary btn-sm" style="color: var(--danger);" data-product-id="${p.id}" data-product-action="delete" title="Delete Product">
               🗑
             </button>
 
@@ -460,26 +459,43 @@ async function loadDatabaseInfo() {
 // -------------------------------------------------------------
 
 function openChangePasswordModal() {
-  const modal = document.getElementById('change-password-modal');
-  if (modal) modal.classList.add('active');
+  document.getElementById('change-password-form').reset();
+  document.getElementById('password-change-error').hidden = true;
+  document.getElementById('change-password-modal').showModal();
 }
 
 function closeChangePasswordModal() {
-  const modal = document.getElementById('change-password-modal');
-  if (modal) modal.classList.remove('active');
+  document.getElementById('change-password-modal').close();
+  document.getElementById('change-password-form').reset();
 }
 
-async function handleChangePassword(e) {
-  if (e) e.preventDefault();
-  const passEl = document.getElementById('new-admin-password');
-  const newPass = passEl ? passEl.value : '';
+async function handleChangePassword(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = form.querySelector('button[type="submit"]');
+  if (submit.disabled) return;
+  const error = document.getElementById('password-change-error');
+  const currentPassword = document.getElementById('current-admin-password').value;
+  const newPassword = document.getElementById('new-admin-password').value;
+  if (newPassword !== document.getElementById('confirm-admin-password').value) {
+    error.textContent = 'The new passwords do not match.';
+    error.hidden = false;
+    document.getElementById('confirm-admin-password').focus();
+    return;
+  }
+
+  error.hidden = true;
+  submit.disabled = true;
   try {
-    const res = await API.post('/api/admin/change-password', { newPassword: newPass });
-    showToast(res.message || 'Admin password updated!', 'success');
-    closeChangePasswordModal();
-    if (e && e.target) e.target.reset();
+    const response = await API.post('/api/admin/change-password', { currentPassword, newPassword });
+    showLoginView();
+    document.getElementById('login-status').textContent = response.message;
+    document.getElementById('admin-password-input').focus();
   } catch (err) {
-    showToast(err.message || 'Failed to update password', 'error');
+    error.textContent = err.message || 'Failed to update password';
+    error.hidden = false;
+  } finally {
+    submit.disabled = false;
   }
 }
 
@@ -603,4 +619,37 @@ window.addEventListener('admin-auth-required', () => {
   showLoginView();
 });
 
+document.getElementById('admin-login-form').addEventListener('submit', handleLogin);
+document.getElementById('nav-logout-btn').addEventListener('click', handleLogout);
+document.getElementById('open-password-dialog').addEventListener('click', openChangePasswordModal);
+document.getElementById('cancel-password-change').addEventListener('click', closeChangePasswordModal);
+document.getElementById('change-password-modal').addEventListener('close', () => document.getElementById('change-password-form').reset());
+document.getElementById('change-password-form').addEventListener('submit', handleChangePassword);
+document.getElementById('open-add-product').addEventListener('click', openAddProductModal);
+document.getElementById('add-product-form').addEventListener('submit', handleAddProduct);
+document.getElementById('edit-product-form').addEventListener('submit', handleEditProduct);
+document.querySelectorAll('[data-close-product-modal="add"]').forEach(button => button.addEventListener('click', closeAddProductModal));
+document.querySelectorAll('[data-close-product-modal="edit"]').forEach(button => button.addEventListener('click', closeEditProductModal));
+document.querySelectorAll('.catalog-filter-btn').forEach(button => button.addEventListener('click', () => setCatalogFilter(button.dataset.filter)));
+document.getElementById('products-table-body').addEventListener('click', event => {
+  const button = event.target.closest('[data-product-action]');
+  if (!button) return;
+  const id = Number(button.dataset.productId);
+  const action = { toggle: toggleShelfStatus, edit: openEditProductModal, delete: deleteProduct }[button.dataset.productAction];
+  action?.(id);
+});
+document.getElementById('products-table-body').addEventListener('change', event => {
+  if (event.target.matches('[data-stock-id]')) updateProductStock(Number(event.target.dataset.stockId), event.target.value);
+});
+document.getElementById('low-stock-table-body').addEventListener('click', event => {
+  const button = event.target.closest('[data-restock-id]');
+  if (button) quickRestock(Number(button.dataset.restockId), Number(button.dataset.stock));
+});
+document.getElementById('orders-table-body').addEventListener('click', event => {
+  const button = event.target.closest('[data-tracking-id]');
+  if (button) promptAddTracking(Number(button.dataset.trackingId));
+});
+document.getElementById('orders-table-body').addEventListener('change', event => {
+  if (event.target.matches('[data-order-id]')) changeOrderStatus(Number(event.target.dataset.orderId), event.target.value);
+});
 document.addEventListener('DOMContentLoaded', checkAuthAndInit);

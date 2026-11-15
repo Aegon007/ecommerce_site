@@ -1,18 +1,28 @@
-const { store } = require('./config');
+const { store, appOrigin, trustProxy } = require('./config');
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { db, dbPath, hashPassword, verifyPassword, queryAll, queryOne, run } = require('./db');
+const { isIP } = require('node:net');
+const { db, dbPath, queryAll, queryOne, run } = require('./db');
 const { HttpError, assert, text, getCoupon, priceTotals, calculateQuote, createOrder, validateProduct } = require('./commerce');
 const { seedData } = require('./seed');
+const { saveInquiry, sendInquiryNotification, listInquiries, updateInquiryStatus } = require('./inquiries');
+const { getAdminSession, sessionCookie, signIn, changeAdminPassword } = require('./admin-auth');
 
 if (process.env.SEED_DEMO_DATA === 'true' || (process.env.NODE_ENV !== 'production' && process.env.SEED_DEMO_DATA !== 'false')) seedData();
-const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
+const PUBLIC_DIR = fs.realpathSync(path.resolve(__dirname, '..', 'public'));
+const PRODUCT_UPDATE_COLUMNS = ['name', 'category', 'description', 'image_url', 'gallery_json', 'price', 'compare_at_price', 'stock', 'is_featured'];
+const ORDER_UPDATE_COLUMNS = ['status', 'tracking_number', 'carrier'];
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
-const securityHeaders = { 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'same-origin' };
-function sendJson(res, status, data) {
-  res.writeHead(status, { ...securityHeaders, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+const securityHeaders = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'same-origin',
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: http:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+};
+function sendJson(res, status, data, headers = {}) {
+  res.writeHead(status, { ...securityHeaders, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
   res.end(JSON.stringify(data));
 }
 function parseJsonBody(req) {
@@ -38,22 +48,24 @@ function parseJsonBody(req) {
     req.on('error', reject);
   });
 }
-function authToken(req) {
-  return req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.headers['x-admin-token'];
-}
-function verifyAdminAuth(req) {
-  const token = authToken(req);
-  if (!token) return null;
-  return queryOne('SELECT username FROM admin_sessions WHERE token = ? AND expires_at > ?', [token, Date.now()])?.username || null;
-}
 const attempts = new Map();
+let nextRateCleanup = 0;
 function rateLimit(req, group, max) {
   const now = Date.now();
-  for (const [key, entry] of attempts) if (entry.reset <= now) attempts.delete(key);
-  const key = group + ':' + req.socket.remoteAddress;
-  const entry = attempts.get(key) || { count: 0, reset: now + 60_000 };
+  if (now >= nextRateCleanup) {
+    for (const [key, entry] of attempts) if (entry.reset <= now) attempts.delete(key);
+    nextRateCleanup = now + 60_000;
+  }
+  const forwarded = req.headers['x-real-ip'];
+  const address = trustProxy && typeof forwarded === 'string' && isIP(forwarded) ? forwarded : req.socket.remoteAddress;
+  const key = `${group}:${address}`;
+  let entry = attempts.get(key);
+  if (!entry || entry.reset <= now) {
+    assert(attempts.has(key) || attempts.size < 5000, 'Too many attempts. Please try again in a minute.', 429);
+    entry = { count: 0, reset: now + 60_000 };
+    attempts.set(key, entry);
+  }
   entry.count += 1;
-  attempts.set(key, entry);
   assert(entry.count <= max, 'Too many attempts. Please try again in a minute.', 429);
 }
 function productView(p, admin = false) {
@@ -72,15 +84,25 @@ const server = http.createServer(async (req, res) => {
     const pathname = parsed.pathname;
     const query = parsed.searchParams;
     if (method === 'OPTIONS') { res.writeHead(204, securityHeaders); return res.end(); }
-    if (!['GET', 'HEAD'].includes(method) && req.headers.origin) {
-      let originHost;
-      try { originHost = new URL(req.headers.origin).host; } catch { /* reject invalid origin */ }
-      assert(originHost === req.headers.host, 'Cross-origin requests are not allowed', 403);
+    if (!['GET', 'HEAD'].includes(method)) {
+      const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      const expectedOrigin = appOrigin || `${scheme}://${req.headers.host}`;
+      if (pathname.startsWith('/api/admin/') || req.headers.origin !== undefined) {
+        assert(req.headers.origin === expectedOrigin, 'Cross-origin requests are not allowed', 403);
+      }
     }
     if (pathname === '/api/health' && method === 'GET') {
       return sendJson(res, 200, { status: 'healthy', database: queryOne('SELECT 1 AS alive').alive === 1 ? 'connected' : 'error', timestamp: new Date().toISOString(), uptime_seconds: Math.floor(process.uptime()), version: '1.1.0', environment: process.env.NODE_ENV || 'development', memory_mb: { rss: Math.round(process.memoryUsage().rss / 1024 / 1024), heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) } });
     }
     if (pathname === '/api/store-config' && method === 'GET') return sendJson(res, 200, store);
+    if (pathname === '/api/inquiries' && method === 'POST') {
+      rateLimit(req, 'inquiry', 10);
+      const body = await parseJsonBody(req);
+      assert(!body.website, 'Unable to accept this inquiry');
+      const { id, created } = saveInquiry(body, req.headers['idempotency-key']);
+      if (created) await sendInquiryNotification(id);
+      return sendJson(res, created ? 201 : 200, { success: true, reference: `INQ-${id}` });
+    }
     if (pathname === '/api/categories' && method === 'GET') {
       return sendJson(res, 200, { categories: queryAll(`SELECT c.*, COUNT(p.id) AS product_count FROM categories c LEFT JOIN products p ON p.category = c.name AND p.is_active = 1 GROUP BY c.id ORDER BY c.id`) });
     }
@@ -97,7 +119,11 @@ const server = http.createServer(async (req, res) => {
         sql += ` AND price ${operator} ?`; params.push(Number(raw));
       }
       const search = query.get('search')?.trim();
-      if (search) { sql += ' AND (name LIKE ? OR description LIKE ? OR category LIKE ?)'; params.push(...Array(3).fill(`%${search}%`)); }
+      if (search) {
+        const pattern = `%${search.replace(/[!%_]/g, '!$&')}%`;
+        sql += " AND (name LIKE ? ESCAPE '!' OR description LIKE ? ESCAPE '!' OR category LIKE ? ESCAPE '!')";
+        params.push(pattern, pattern, pattern);
+      }
       const sort = new Map([['price_asc', 'price ASC'], ['price_desc', 'price DESC'], ['rating', 'rating DESC']]).get(query.get('sortBy')) || 'is_featured DESC, id DESC';
       sql += ` ORDER BY ${sort}`;
       if (query.has('limit')) {
@@ -114,6 +140,9 @@ const server = http.createServer(async (req, res) => {
       const product = queryOne(`SELECT * FROM products WHERE ${/^\d+$/.test(id) ? 'id' : 'slug'} = ? AND is_active = 1`, [id]);
       assert(product, 'Product not found', 404);
       return sendJson(res, 200, { product: { ...productView(product), reviews: queryAll('SELECT * FROM reviews WHERE product_id = ? ORDER BY id DESC', [product.id]), related: queryAll('SELECT * FROM products WHERE category = ? AND id != ? AND is_active = 1 LIMIT 4', [product.category, product.id]).map(p => productView(p)) } });
+    }
+    if (!store.salesEnabled && /^\/api\/(?:coupons|checkout|orders|payments)(?:\/|$)/.test(pathname)) {
+      throw new HttpError(404, 'Online checkout and order lookup are currently closed');
     }
     if (pathname === '/api/coupons/validate' && method === 'POST') {
       const { code, subtotal } = await parseJsonBody(req);
@@ -141,7 +170,7 @@ const server = http.createServer(async (req, res) => {
     if (orderMatch && method === 'GET') {
       rateLimit(req, 'lookup', 20);
       const order = queryOne('SELECT * FROM orders WHERE order_number = ?', [orderMatch[1]]);
-      assert(order && (verifyAdminAuth(req) || (order.lookup_token && req.headers['x-order-token'] === order.lookup_token)), 'Verify your order reference and email to view this order', 404);
+      assert(order && (getAdminSession(req) || (order.lookup_token && req.headers['x-order-token'] === order.lookup_token)), 'Verify your order reference and email to view this order', 404);
       return sendJson(res, 200, { order: orderView(order) });
     }
     if (pathname === '/api/payments/config' && method === 'GET') {
@@ -153,42 +182,53 @@ const server = http.createServer(async (req, res) => {
       rateLimit(req, 'login', 10);
       const body = await parseJsonBody(req);
       const username = text(body.username || 'admin', 'Username', 100);
-      assert(typeof body.password === 'string' && body.password.length > 0 && body.password.length <= 1024, 'Password is required');
-      const user = queryOne('SELECT * FROM admin_users WHERE username = ?', [username]);
-      const valid = verifyPassword(body.password, user?.password_hash || hashPassword('invalid-account'));
-      assert(user && valid, 'Invalid username or password', 401);
-      if (!user.password_hash.startsWith('scrypt$')) run('UPDATE admin_users SET password_hash = ? WHERE id = ?', [hashPassword(body.password), user.id]);
-      run('DELETE FROM admin_sessions WHERE expires_at <= ?', [Date.now()]);
-      const token = crypto.randomBytes(32).toString('hex');
-      run('INSERT INTO admin_sessions (token, username, expires_at) VALUES (?, ?, ?)', [token, username, Date.now() + 7 * 24 * 3600 * 1000]);
-      return sendJson(res, 200, { success: true, token, username, role: user.role });
+      const { role, cookie } = signIn(username, body.password);
+      return sendJson(res, 200, { success: true, username, role }, { 'Set-Cookie': cookie });
     }
     if (pathname.startsWith('/api/admin/')) {
-      const username = verifyAdminAuth(req);
-      assert(username, 'Authentication required. Please sign in.', 401);
+      const session = getAdminSession(req);
+      assert(session, 'Authentication required. Please sign in.', 401);
+      const { username } = session;
+      if (pathname === '/api/admin/inquiries' && method === 'GET') {
+        return sendJson(res, 200, listInquiries(query.get('before')));
+      }
+      const inquiryMatch = pathname.match(/^\/api\/admin\/inquiries\/(\d+)(\/retry-email)?$/);
+      if (inquiryMatch) {
+        const id = Number(inquiryMatch[1]);
+        assert(Number.isSafeInteger(id) && id > 0, 'Inquiry not found', 404);
+        if (method === 'POST' && inquiryMatch[2]) {
+          return sendJson(res, 200, { emailStatus: await sendInquiryNotification(id) });
+        }
+        if (method === 'PATCH' && !inquiryMatch[2]) {
+          const { status } = await parseJsonBody(req);
+          updateInquiryStatus(id, status);
+          return sendJson(res, 200, { status });
+        }
+      }
       if (pathname === '/api/admin/verify' && method === 'GET') return sendJson(res, 200, { authenticated: true, username });
       if (pathname === '/api/admin/logout' && method === 'POST') {
-        run('DELETE FROM admin_sessions WHERE token = ?', [authToken(req)]);
-        return sendJson(res, 200, { success: true });
+        run('DELETE FROM admin_sessions WHERE token = ?', [session.token]);
+        return sendJson(res, 200, { success: true }, { 'Set-Cookie': sessionCookie() });
       }
       if (pathname === '/api/admin/change-password' && method === 'POST') {
-        const { newPassword } = await parseJsonBody(req);
-        assert(typeof newPassword === 'string' && newPassword.length >= 12 && newPassword.length <= 1024, 'New password must be between 12 and 1024 characters');
-        db.exec('BEGIN IMMEDIATE');
-        try {
-          run('UPDATE admin_users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE username = ?', [hashPassword(newPassword), username]);
-          run('DELETE FROM admin_sessions WHERE username = ? AND token != ?', [username, authToken(req)]);
-          db.exec('COMMIT');
-        } catch (error) { db.exec('ROLLBACK'); throw error; }
-        return sendJson(res, 200, { success: true, message: 'Password updated. Other sessions have been signed out.' });
+        rateLimit(req, 'password-change', 6);
+        const { currentPassword, newPassword } = await parseJsonBody(req);
+        changeAdminPassword(username, currentPassword, newPassword);
+        return sendJson(res, 200, { success: true, message: 'Password updated. Sign in with your new password.' }, { 'Set-Cookie': sessionCookie() });
       }
       if (pathname === '/api/admin/metrics' && method === 'GET') {
         const lowStock = queryAll('SELECT id, name, stock, price FROM products WHERE stock <= 15 AND is_active = 1 ORDER BY stock');
         return sendJson(res, 200, { metrics: { total_revenue: queryOne("SELECT SUM(total) AS n FROM orders WHERE status != 'cancelled' AND payment_status = 'paid'").n || 0, total_orders: queryOne('SELECT COUNT(*) AS n FROM orders').n, pending_orders: queryOne("SELECT COUNT(*) AS n FROM orders WHERE status IN ('pending', 'processing')").n, low_stock_count: lowStock.length }, low_stock_products: lowStock, recent_orders: queryAll('SELECT * FROM orders ORDER BY id DESC LIMIT 5').map(orderView) });
       }
       if (pathname === '/api/admin/database-info' && method === 'GET') {
-        const count = (table, where = '') => queryOne(`SELECT COUNT(*) AS n FROM ${table} ${where}`).n;
-        return sendJson(res, 200, { engine: 'SQLite 3', driver: 'Node.js node:sqlite DatabaseSync', journal_mode: 'WAL', database_file: dbPath, file_size_kb: Math.round(fs.statSync(dbPath).size / 1024), status: 'Online & Active', tables: { products_total: count('products'), products_on_shelf: count('products', 'WHERE is_active = 1'), products_off_shelf: count('products', 'WHERE is_active = 0'), orders: count('orders'), categories: count('categories'), coupons: count('coupons') } });
+        const tables = queryOne(`SELECT
+          (SELECT COUNT(*) FROM products) AS products_total,
+          (SELECT COUNT(*) FROM products WHERE is_active = 1) AS products_on_shelf,
+          (SELECT COUNT(*) FROM products WHERE is_active = 0) AS products_off_shelf,
+          (SELECT COUNT(*) FROM orders) AS orders,
+          (SELECT COUNT(*) FROM categories) AS categories,
+          (SELECT COUNT(*) FROM coupons) AS coupons`);
+        return sendJson(res, 200, { engine: 'SQLite 3', driver: 'Node.js node:sqlite DatabaseSync', journal_mode: 'WAL', database_file: dbPath, file_size_kb: Math.round(fs.statSync(dbPath).size / 1024), status: 'Online & Active', tables });
       }
       if (pathname === '/api/admin/orders' && method === 'GET') return sendJson(res, 200, { orders: queryAll('SELECT * FROM orders ORDER BY id DESC LIMIT 50').map(orderView) });
       if (pathname === '/api/admin/products' && method === 'GET') {
@@ -221,8 +261,9 @@ const server = http.createServer(async (req, res) => {
         assert(current, 'Product not found', 404);
         const product = validateProduct(await parseJsonBody(req), true);
         if (product.image_url !== undefined && product.image_url !== current.image_url) product.gallery_json = JSON.stringify([product.image_url, ...JSON.parse(current.gallery_json || '[]').filter(image => image !== current.image_url && image !== product.image_url)]);
-        const keys = Object.keys(product);
-        run(`UPDATE products SET ${keys.map(key => key + ' = ?').join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [...Object.values(product), id]);
+        const columns = PRODUCT_UPDATE_COLUMNS.filter(column => Object.hasOwn(product, column));
+        run(`UPDATE products SET ${columns.map(column => `${column} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [...columns.map(column => product[column]), id]);
         return sendJson(res, 200, { product: productView(queryOne('SELECT * FROM products WHERE id = ?', [id]), true) });
       }
       const updateOrderMatch = pathname.match(/^\/api\/admin\/orders\/(\d+)$/);
@@ -245,8 +286,9 @@ const server = http.createServer(async (req, res) => {
         db.exec('BEGIN IMMEDIATE');
         try {
           if (updates.status === 'cancelled' && order.status !== 'cancelled') for (const item of JSON.parse(order.items_json)) run('UPDATE products SET stock = stock + ? WHERE id = ?', [item.quantity, item.id]);
-          const keys = Object.keys(updates);
-          run(`UPDATE orders SET ${keys.map(key => key + ' = ?').join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [...Object.values(updates), orderId]);
+          const columns = ORDER_UPDATE_COLUMNS.filter(column => Object.hasOwn(updates, column));
+          run(`UPDATE orders SET ${columns.map(column => `${column} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [...columns.map(column => updates[column]), orderId]);
           db.exec('COMMIT');
         } catch (error) { db.exec('ROLLBACK'); throw error; }
         return sendJson(res, 200, { order: orderView(queryOne('SELECT * FROM orders WHERE id = ?', [orderId])) });
@@ -260,11 +302,17 @@ const server = http.createServer(async (req, res) => {
     let file = path.resolve(PUBLIC_DIR, decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, ''));
     assert(file.startsWith(PUBLIC_DIR + path.sep), 'Access denied', 403);
     if (!fs.existsSync(file) && fs.existsSync(file + '.html')) file += '.html';
+    if (!store.salesEnabled && ['cart.html', 'order-confirmation.html'].includes(path.relative(PUBLIC_DIR, file).toLowerCase())) {
+      res.writeHead(302, { ...securityHeaders, 'Cache-Control': 'no-store', Location: '/contact.html' });
+      return res.end();
+    }
     if (fs.existsSync(file) && fs.statSync(file).isFile()) {
+      const resolvedFile = fs.realpathSync(file);
+      assert(resolvedFile.startsWith(PUBLIC_DIR + path.sep), 'Access denied', 403);
       const ext = path.extname(file).toLowerCase();
       res.writeHead(200, { ...securityHeaders, 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ['.html', '.css', '.js'].includes(ext) ? 'no-cache' : 'public, max-age=3600' });
       if (method === 'HEAD') return res.end();
-      const stream = fs.createReadStream(file);
+      const stream = fs.createReadStream(resolvedFile);
       stream.on('error', () => res.destroy());
       return stream.pipe(res);
     }

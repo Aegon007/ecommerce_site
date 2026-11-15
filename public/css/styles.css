@@ -1269,3 +1269,83 @@ button:disabled { opacity: .48; cursor: not-allowed; transform: none !important;
   .product-actions > button:last-child { width: 100%; } .gallery-main { height: auto; aspect-ratio: 1; }
 }
 @media(prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { transition: none !important; animation: none !important; } }
+
+.nav-contact { white-space: nowrap; }
+.product-intro { margin-bottom: 1.5rem; color: var(--text-muted); }
+.product-inquiry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.3rem;
+  margin: 1.75rem 0;
+  background: var(--primary-light);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+.product-inquiry p { margin-top: .25rem; color: var(--text-muted); font-size: .9rem; }
+.product-spec-heading { margin-top: 2rem; font-size: 1.15rem; }
+.contact-layout {
+  display: grid;
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+  align-items: start;
+  gap: clamp(2rem, 6vw, 6rem);
+  max-width: 1100px;
+  padding-block: clamp(2.5rem, 7vw, 6rem);
+  flex: 1;
+}
+.contact-intro { padding-top: 1rem; }
+.contact-intro h1 { font: 500 clamp(3.5rem, 7vw, 6rem)/1 Georgia, serif; letter-spacing: -.06em; }
+.contact-intro > p { margin-top: 1.25rem; max-width: 32ch; color: var(--text-muted); }
+.contact-product {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .8rem;
+  margin-top: 1.75rem;
+  padding: .75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+.contact-product img { width: 64px; height: 64px; object-fit: cover; border-radius: var(--radius-sm); }
+.contact-product a { display: block; font-weight: 650; overflow-wrap: anywhere; }
+.contact-product a:hover { text-decoration: underline; }
+.contact-card { margin: 0; padding: clamp(1.25rem, 4vw, 2.25rem); }
+.contact-card h2 { margin-bottom: 1.35rem; font-size: 1.5rem; letter-spacing: -.03em; }
+.contact-card textarea { resize: vertical; min-height: 8rem; }
+.contact-note { color: var(--text-muted); font-size: .85rem; }
+.contact-error { color: var(--danger); }
+#inquiry-submit { margin-top: 1rem; }
+#inquiry-feedback:not(:empty) { margin-top: .75rem; }
+.inquiry-trap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.inquiry-success { padding-block: 1.25rem; }
+.inquiry-success h3 { font-size: 1.35rem; }
+.inquiry-success p { margin: .6rem 0 1rem; color: var(--text-muted); }
+.inbox-toolbar, .inbox-meta, .inbox-actions, .inbox-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
+.inbox-toolbar { justify-content: space-between; margin-bottom: .75rem; }
+.inbox-toolbar h2 { font-size: 1.35rem; }
+#inbox-email-state { margin-bottom: .85rem; }
+.inbox-entry { border-bottom: 1px solid var(--border-color); }
+.inbox-entry summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: 1rem .25rem; cursor: pointer; }
+.inbox-entry summary::after { content: '+'; color: var(--primary); font-weight: 700; }
+.inbox-entry[open] summary::after { content: '−'; }
+.inbox-entry summary > div:first-child { flex: 1 1 14rem; overflow-wrap: anywhere; }
+.inbox-topic { display: block; color: var(--text-muted); font-size: .86rem; }
+.inbox-meta small { color: var(--text-muted); }
+.inbox-body { padding: 0 .25rem 1.15rem; }
+.inbox-details { display: flex; flex-wrap: wrap; gap: .65rem 1.5rem; }
+.inbox-details dt { color: var(--text-muted); font-size: .79rem; }
+.inbox-details dd { margin: .15rem 0 0; overflow-wrap: anywhere; }
+.inbox-message { margin: .8rem 0; padding: .9rem 1rem; border-radius: var(--radius-sm); background: var(--bg-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.inbox-pagination { margin-top: 1rem; }
+
+#change-password-modal { margin: auto; }
+#change-password-modal::backdrop { background: rgba(45, 36, 30, .65); }
+#password-change-error { margin-bottom: 1rem; }
+#login-status:not(:empty) { margin-bottom: 1rem; color: var(--accent); }
+
+@media (max-width: 760px) {
+  .contact-layout { grid-template-columns: minmax(0, 1fr); }
+  .contact-intro { padding-top: 0; }
+}
