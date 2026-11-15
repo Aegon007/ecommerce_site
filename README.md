@@ -143,6 +143,52 @@ npm ci && HOST=127.0.0.1 PORT=3000 NODE_ENV=development APP_ORIGIN=http://127.0.
 
 测试完成后，在 SSH 窗口按 **Ctrl+C** 停止网站，释放服务器的 `3000` 端口。
 
+<a id="cloudflare-quick-preview"></a>
+
+### 用 Cloudflare 临时链接测试
+
+上面的测试命令让网站只监听服务器本机的 `127.0.0.1:3000`，所以通过公网 IP 直接打开网页或访问 `公网 IP:3000` 都连不到这个测试进程。想从浏览器直接打开一个 HTTPS 网址，可以让 Cloudflare Quick Tunnel 把流量转发到服务器本机。这个阶段可以先保留域名现有设置，服务器也无需开放网站端口。[Cloudflare Quick Tunnel](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
+
+<details>
+<summary>在 Ubuntu 20.04 上安装 cloudflared</summary>
+
+下面添加 Cloudflare 面向 Ubuntu 20.04 的稳定软件源并安装客户端。已安装的用户也可用这个软件源更新，以使用 `--allowed-mail` 邮箱验证。[Cloudflare 软件源](https://pkg.cloudflare.com/index.html) · [受保护的 Quick Tunnel](https://developers.cloudflare.com/changelog/post/2026-10-02-protected-quick-tunnels/)
+
+```bash
+sudo install -d -m 0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+  | sudo tee /usr/share/keyrings/cloudflare-main.gpg > /dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared focal main' \
+  | sudo tee /etc/apt/sources.list.d/cloudflared.list > /dev/null
+sudo apt update
+sudo apt install cloudflared
+```
+
+</details>
+
+1. 如果上面的 SSH 测试网站还在运行，先在原窗口按 **Ctrl+C**。然后在第一个 Ubuntu SSH 窗口启动临时隧道。把邮箱换成你能收验证码的地址，复制终端显示的 `https://…trycloudflare.com` 完整网址，保持窗口开着。
+
+   ```bash
+   cloudflared tunnel --url http://127.0.0.1:3000 --allowed-mail 'your-email@example.com'
+   ```
+
+2. 新开一个 SSH 窗口，进入项目目录并运行下面的命令。按提示粘贴隧道给出的 HTTPS 地址，再输入至少 12 个字符的测试后台密码。`APP_ORIGIN` 要与浏览器打开的地址一致，后台登录和询盘提交才会通过校验。
+
+   ```bash
+   (
+     npm ci &&
+     IFS= read -r -p 'Cloudflare HTTPS URL: ' CF_PREVIEW_ORIGIN &&
+     IFS= read -r -s -p 'Preview admin password: ' CF_PREVIEW_PASSWORD && printf '\n' &&
+     HOST=127.0.0.1 PORT=3000 NODE_ENV=production APP_ORIGIN="$CF_PREVIEW_ORIGIN" \
+       DB_PATH=data/cloudflare-preview.db SEED_DEMO_DATA=true ADMIN_PASSWORD="$CF_PREVIEW_PASSWORD" \
+       ENABLE_DEMO_CHECKOUT=false TRUST_PROXY=false SMTP_HOST= sh ./run.sh
+   )
+   ```
+
+3. 在浏览器打开临时网址，先收邮件验证码，再浏览网站。后台路径是 `/admin.html`，用户名是 `admin`。测试图片和询盘保存在 `data/cloudflare-preview.db`，同一个数据库会保留第一次设定的密码。若想预览之前在 `data/preview.db` 编辑过的商品，先在原 SSH 测试后台改掉默认密码，再将上面的 `DB_PATH` 换成 `data/preview.db`。
+
+临时网址在 `cloudflared` 停止后失效。重新启动隧道后，把新地址填给网站进程。若临时网址显示 `502`，先在 Ubuntu 执行 `curl -fsS http://127.0.0.1:3000/api/health`，确认网站进程已启动。[Cloudflare 隧道排查](https://developers.cloudflare.com/tunnel/troubleshooting/)
+
 ## 测试通过后再部署正式网站（无需 Docker）
 
 ### 1. 安装 Caddy
@@ -196,7 +242,7 @@ ENABLE_DEMO_CHECKOUT=false
 
 保存时按 **Ctrl+O**，按 **Enter** 确认文件名，再按 **Ctrl+X** 退出。`HOST=127.0.0.1` 让 Node.js 只接受服务器本机的连接，由 Caddy 对外服务。`DB_PATH` 是数据库文件的位置，第一次部署时会自动创建。已有正式数据时继续用原来的数据库，脚本部署的数据库放在 `/var/lib/apex-goods/` 下。需要发邮件时在同一个文件补齐 [SMTP 设置](#inquiry-email)。
 
-域名要先通过 DNS 指向服务器。在管理该域名 DNS 的平台上，为根域名 `@` 增加 `A` 记录，填服务器公网 IPv4，再为 `www` 增加 `CNAME` 记录，填你的根域名。如果使用 Cloudflare，按 [域名接入的第 1、2 步](#cloudflare-domain) 添加记录，初次部署选 **DNS only**（灰云）。可以在服务器用 `dig +short A www.example.com` 核对解析结果是否包含服务器公网 IP，记得替换域名。
+准备好上线时再配置域名。如果要用 Cloudflare，先在 Cloudflare 添加已买好的域名，回原注册商更换 Nameserver，再到 Cloudflare 配置 DNS 记录。按 [域名接入的第 1、2 步](#cloudflare-domain) 操作，初次配置 Caddy 证书时选 **DNS only**（灰云）。域名由原平台管理时，在原平台添加站点记录即可。根域名 `@` 用 `A` 记录填服务器公网 IPv4，`www` 用 `CNAME` 填根域名。可运行 `dig +short A www.example.com` 核对实际域名是否指向服务器。
 
 在云平台控制台找到**防火墙**或**安全组**的入站规则，开放网站用的 `80/tcp` 和 `443/tcp`，保留现有的 SSH 规则。应用的 `3000` 只供本机使用。Ubuntu 上可以用 `sudo ufw status` 检查本机防火墙。如果它显示 `Status: active`，还要运行下面两条命令。[Ubuntu 防火墙说明](https://ubuntu.com/server/docs/how-to/security/firewalls/)
 
@@ -331,6 +377,8 @@ curl -fsS http://127.0.0.1:3000/api/health
 ## 接入已注册的域名和 Cloudflare
 
 这里以 `www.example.com` 为网站主地址，`example.com` 自动跳转到 `www`。把示例域名和 IP 换成你自己的。上面的 Linux 直接部署和 Docker Compose + Caddy 都可以按这个流程配置。
+
+下文适用于用 Caddy 接收网站请求，再开启 Cloudflare 代理的正式部署。也可以在 Cloudflare 创建常驻 Tunnel，把自有域名绑定到该隧道的公开主机名，目标服务填 `http://127.0.0.1:3000`，这种接法不需要站点的公网 IP 记录。应用的 `APP_ORIGIN` 填浏览器打开的正式 HTTPS 网址，直接由 `cloudflared` 转给 Node.js 时保持 `TRUST_PROXY=false`。[Cloudflare 常驻 Tunnel 配置](https://developers.cloudflare.com/tunnel/get-started/)
 
 ### 1. 将域名交给 Cloudflare 解析
 
