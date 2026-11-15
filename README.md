@@ -20,49 +20,33 @@ sh ./run.sh
 
 打开 [产品展示](http://localhost:3000)、[询盘表单](http://localhost:3000/contact.html) 或 [管理员后台](http://localhost:3000/admin.html)。如果 3000 已占用，先停止旧服务，或在 `.env` 更换 `PORT`。
 
-## Linux 部署（无需 Docker）
+## 先在 Ubuntu 服务器上测试
 
-下面按 **本机 Windows 11、服务器 Ubuntu Server 20.04 LTS** 编写，适用于 `amd64`（Intel/AMD 64 位）或 `arm64`（ARM 64 位）服务器。你需要服务器的公网 IP、可以用 `sudo` 的登录账号，以及一个已注册的域名。按顺序运行命令，遇到报错先处理当前步骤。
+这一步只需要 Windows 11 能通过 SSH 登录 Ubuntu 20.04。网站运行在服务器上，你在 Windows 浏览器里测试。域名、`.env` 和 Caddy 都可以等测试通过后再配置。
 
-| 软件 | 在这个网站里做什么 |
-| --- | --- |
-| Node.js | 运行网站的 JavaScript 后端，处理商品、登录和询盘。 |
-| npm | 安装后端依赖。下面安装的 Node.js 软件包已包含 npm。 |
-| Caddy | 接收来自公网的 HTTP 和 HTTPS 请求，把请求转给本机的 Node.js，并自动申请和续期 HTTPS 证书。 |
-| systemd | Ubuntu 自带的服务管理器，让网站随服务器开机启动，崩溃后可以自动重启。 |
-| SQLite | 将商品和询盘保存在一个数据库文件里。所需功能已随 Node.js 提供。 |
+### 1. 从 Windows 登录并打开测试通道
 
-### 1. 登录服务器
-
-在云平台控制台找到服务器的公网 IP 和 SSH 用户名，准备创建服务器时保存的登录私钥。打开 **Windows 11 上的 PowerShell**。如果运行 `ssh -V` 提示找不到命令，在 Windows 搜索 **可选功能**，添加 **OpenSSH 客户端**，再重新打开 PowerShell。[Windows 上安装 OpenSSH](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse)
-
-下面假设用户名是 `ubuntu`、SSH 端口是 `22`。替换示例 IP、用户名和 `.pem` 私钥路径。若服务器允许密码登录，或你已将私钥放在 SSH 的默认位置，可去掉 `-i` 及后面的路径。第一次连接时，核对服务器的 SSH 指纹后接受连接。[Windows 上使用 SSH](https://learn.microsoft.com/en-us/windows/terminal/tutorials/ssh)
+在 **Windows PowerShell** 里运行下面的命令。把示例 IP、用户名和私钥路径换成平时登录服务器用的值。已有 SSH 登录命令时，给它加上 `-L 127.0.0.1:3300:127.0.0.1:3000` 即可。如果 `ssh` 命令找不到，在 Windows **可选功能**中安装 **OpenSSH 客户端**。[Windows OpenSSH 安装](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse) · [SSH 端口转发](https://man.openbsd.org/ssh#L)
 
 ```powershell
-ssh -i "C:\Users\你的用户名\Downloads\server-key.pem" ubuntu@203.0.113.10
+ssh -o ExitOnForwardFailure=yes -L 127.0.0.1:3300:127.0.0.1:3000 -i "C:\Users\你的用户名\Downloads\server-key.pem" ubuntu@203.0.113.10
 ```
 
-登录成功后，下面的 Linux 命令都在**服务器的 SSH 窗口**里执行。系统信息应显示 `VERSION_ID="20.04"`，架构应为 `amd64` 或 `arm64`。`sudo -v` 可能要求输入服务器账号的密码，终端输入密码时不会显示字符。
+这个 SSH 通道会把你电脑的 `3300` 端口接到服务器本机的 `3000` 端口。登录后继续在同一个窗口执行下面的 Linux 命令。
 
-```bash
-cat /etc/os-release
-dpkg --print-architecture
-sudo -v
-```
+### 2. 确认服务器有 Node.js 和 npm
 
-Ubuntu 20.04 已结束常规安全维护。继续用这版系统对外运行网站时，可以通过 Ubuntu Pro 的扩展安全维护（ESM）获取系统补丁。先在服务器检查 `pro status`。若找不到 `pro`，运行 `sudo apt update` 和 `sudo apt install ubuntu-advantage-tools`。若显示尚未绑定，运行 `sudo pro attach`，在本机浏览器打开终端给出的网址，按提示绑定。再用 `pro status` 检查 `esm-infra` 和 `esm-apps`，对尚未启用的项目分别运行 `sudo pro enable esm-infra` 或 `sudo pro enable esm-apps`。最后运行 `sudo apt update` 和 `sudo apt upgrade` 安装更新。[Ubuntu 20.04 支持周期](https://ubuntu.com/project/docs/release-team/list-of-releases/#expanded-security-maintenance) · [Ubuntu Pro 绑定步骤](https://ubuntu.com/pro-client/docs/en/docs/tutorials/basic_commands/)
+运行 `node -v` 和 `npm -v`。Node.js 负责运行网站后端，npm 负责安装项目依赖。已有 Node.js 22.13 或以上且 npm 能用，就可以直接做下一步。
 
-### 2. 安装 Node.js 和 npm
+<details>
+<summary>还没装 Node.js 和 npm，展开看安装命令</summary>
 
-`apt` 是 Ubuntu 安装和更新软件的工具。先更新软件清单，装好 Git（下载项目）、curl（下载或检查网址）、GnuPG（配置软件源签名）和 nano（编辑配置文件）等工具。
+在 Ubuntu 20.04 的 64 位服务器上，用 `apt` 安装 NodeSource 提供的 Node.js 24 LTS。该软件包包含 npm。下面也会安装下载代码和配置软件源所需的工具。[NodeSource 兼容列表](https://github.com/nodesource/distributions/blob/master/DEV_README.md#deb-supported-versions) · [NodeSource 软件源配置](https://github.com/nodesource/distributions/blob/master/scripts/deb/setup_24.x)
 
 ```bash
 sudo apt update
-sudo apt install -y ca-certificates curl gnupg git nano openssh-client \
-  iproute2 util-linux dnsutils ufw
+sudo apt install -y ca-certificates curl gnupg git
 ```
-
-项目至少需要 **Node.js 22.13**。这里通过支持 Ubuntu 20.04 的 NodeSource 软件源安装 **Node.js 24 LTS**，让服务器上的服务账号也能用 `node` 和 `npm`。下面先添加用于验证软件包的签名公钥，再告诉 `apt` 从哪里获取 24.x 软件包。[NodeSource 兼容列表](https://github.com/nodesource/distributions/blob/master/DEV_README.md#deb-supported-versions) · [NodeSource 软件源配置](https://github.com/nodesource/distributions/blob/master/scripts/deb/setup_24.x)
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
@@ -84,29 +68,37 @@ command -v node
 node --no-warnings -e "require('node:sqlite')"
 ```
 
-### 3. 安装 Caddy
+</details>
 
-添加 Caddy 官方稳定版的软件源，再安装 `caddy`。这个软件包会一并创建 `caddy.service` 和默认配置文件 `/etc/caddy/Caddyfile`。后面的部署脚本会把正式域名写入该文件。[Caddy 官方安装说明](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
+### 3. 进入项目目录
+
+已有代码时，直接进入现在的目录，例如 `cd /opt/ecommerce_site`。运行 `ls package.json run.sh`，能看到这两个文件就可以继续。`/opt` 是 Linux 上放额外安装的软件的一种常见选择。也可以用 `/srv/ecommerce_site` 或其他目录，后面的命令都在你实际的项目目录里执行。[Linux 目录约定](https://refspecs.linuxfoundation.org/FHS_3.0/fhs-3.0.html)
+
+<details>
+<summary>提示 Permission denied，怎么修？</summary>
+
+在项目目录执行 `ls -ld .`，查看目录所有者。`sudo test -e .env || install ...` 中的 `sudo` 只作用于 `test`，创建文件的 `install` 仍由当前账号执行。这个项目的目录应由你用来部署的 SSH 账号管理，这样 npm 才能在里面安装依赖，后面也能创建 `.env`。
+
+如果 `/opt/ecommerce_site` 确实是你要部署的项目，且当前目录归 `root` 或其他账号，执行下面一条，把这个目录交给当前 SSH 账号。
 
 ```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
-  | sudo gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
-  | sudo tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
-sudo chmod 644 /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
-  /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install -y caddy
-caddy version
-systemctl is-active caddy
+sudo chown "$(id -un):$(id -gn)" /opt/ecommerce_site
 ```
 
-最后一条应显示 `active`。如果显示 `failed`，用 `sudo journalctl -u caddy -n 50 --no-pager` 看原因。若日志提示端口已被占用，用 `sudo ss -ltnp` 查谁在使用 `80` 或 `443`。已有 Nginx 或 Apache 的服务器需要先决定由哪个服务接收公网请求。
+如果这是刚用 `sudo git clone` 下载的项目，且整个项目里的文件也都归 `root`，可以把下列命令用于这个新检出的项目目录。它会一并修正 `.git` 和项目内文件的所有者。
 
-### 4. 下载项目到服务器
+```bash
+sudo chown -R --no-dereference "$(id -un):$(id -gn)" /opt/ecommerce_site
+```
 
-先确认最新代码已从你电脑推送到 GitHub。`/opt/ecommerce_website` 是**服务器上的目录**。下面创建这个目录并交给当前 SSH 用户管理，再把项目直接克隆进去。`git clone` 最后的 `.` 表示放到当前目录。下面的克隆命令只在首次安装、目录为空时执行。
+如果之前已经用 `sudo` 创建了普通文件 `.env`，在项目目录用 `sudo chown "$(id -un)" .env` 把它交给当前账号，再用 `nano .env` 编辑。首次测试可以先跳过创建 `.env`。
+
+</details>
+
+<details>
+<summary>服务器上还没有代码，展开看下载步骤</summary>
+
+先把最新代码推送到 GitHub。如果服务器还没有 `git`，运行 `sudo apt install git`。`sudo install -d` 创建目录并交给当前账号。`git clone` 最后的 `.` 表示克隆到当前目录。
 
 ```bash
 sudo install -d -m 0755 -o "$(id -un)" -g "$(id -gn)" /opt/ecommerce_website
@@ -115,10 +107,7 @@ git clone https://github.com/Aegon007/ecommerce_site.git .
 ls -l package.json deploy/deploy-linux.sh
 ```
 
-如果用了自己的 GitHub 仓库，从仓库页面点 **Code → HTTPS** 复制地址，替换上面的地址。
-
-<details>
-<summary>GitHub 仓库是私有的，怎么让服务器下载？</summary>
+如果用了另一个仓库，从仓库页面点 **Code → HTTPS** 复制地址。私有仓库可使用下面的部署密钥流程。
 
 用一把只供此仓库读取的部署密钥。先在**服务器**上生成密钥。提示输入短语时，可以为此密钥设置密码；以后手动拉取代码时需要解锁它。
 
@@ -140,14 +129,55 @@ ls -l package.json deploy/deploy-linux.sh
 
 </details>
 
-### 5. 填写网站配置并连接域名
+### 4. 启动网站并在浏览器检查
+
+在服务器的项目目录运行下面的命令。`npm ci` 安装依赖，成功后启动测试版。测试商品和询盘保存在 `data/preview.db`，此时提交询盘只会保存记录。
+
+```bash
+npm ci && HOST=127.0.0.1 PORT=3000 NODE_ENV=development APP_ORIGIN=http://127.0.0.1:3300 \
+  DB_PATH=data/preview.db SEED_DEMO_DATA=true ADMIN_PASSWORD=123 \
+  ENABLE_DEMO_CHECKOUT=false TRUST_PROXY=false SMTP_HOST= sh ./run.sh
+```
+
+终端看到 `Apex Goods: http://localhost:3000` 后，保持 SSH 窗口打开，在 **Windows 浏览器**访问 [网站首页](http://127.0.0.1:3300/)。用 `admin` / `123` 登录 [测试后台](http://127.0.0.1:3300/admin.html)，再到 [询盘页](http://127.0.0.1:3300/contact.html) 提交一条留言，确认它出现在后台的 **Inquiries**。如果这份测试数据库已经改过密码，使用改过的密码。
+
+测试完成后，在 SSH 窗口按 **Ctrl+C** 停止网站，释放服务器的 `3000` 端口。
+
+## 测试通过后再部署正式网站（无需 Docker）
+
+### 1. 安装 Caddy
+
+Caddy 接收公网请求，把请求转给本机的 Node.js，并自动申请 HTTPS 证书。部署脚本还会配置 Ubuntu 自带的 systemd，让网站随服务器启动。继续使用 Ubuntu 20.04 上线时，先查看下方的[上线安全设置](#上线安全设置)，确认该系统能收到安全补丁。
+
+<details>
+<summary>展开查看 Ubuntu 20.04 的 Caddy 安装命令</summary>
+
+在服务器上执行。最后一条应显示 `active`。安装失败时用 `sudo journalctl -u caddy -n 50 --no-pager` 查看日志。[Caddy 官方安装说明](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg nano debian-keyring debian-archive-keyring \
+  apt-transport-https iproute2 util-linux dnsutils ufw
+curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+  | sudo gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
+sudo chmod 644 /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+  /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy
+caddy version
+systemctl is-active caddy
+```
+
+</details>
+
+### 2. 填写 `.env` 并连接域名
 
 `.env` 是服务器上的配置文件，用来保存正式域名、初始管理员密码和 SMTP 发信设置。它以 `.` 开头，是隐藏文件，可以用 `ls -a` 查看文件名。下面从模板创建 `.env`，已有文件时直接打开编辑。
 
 ```bash
-cd /opt/ecommerce_website
-test -e .env || install -m 600 .env.example .env
-nano .env
+(test -e .env || install -m 600 .env.example .env) && nano .env
 ```
 
 在 nano 里找到以下设置，改成示例的格式。模板中某一行以 `#` 开头时，去掉该行开头的 `#` 才会生效。把 `www.example.com` 换成你的主站域名，`https://` 保留，地址末尾无需加 `/`。首次创建数据库时，把 `ADMIN_PASSWORD=""` 的引号内填上至少 **12 个字符**的独立密码，默认登录名是 `admin`。
@@ -175,12 +205,13 @@ sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 ```
 
-### 6. 运行部署脚本并验证
+### 3. 运行部署脚本并验证
 
-继续使用先前的普通 SSH 账号运行脚本，脚本需要修改系统配置时会调用 `sudo`。如果 `.env` 里用了 `https://www.example.com`，下面的参数 `example.com` 会把裸域名跳转到 `www`。换成你自己的根域名。如果主站直接用裸域名，或只配置了 `www` 这一条 DNS，运行 `bash deploy/deploy-linux.sh` 即可。
+继续使用先前的普通 SSH 账号，在项目目录运行脚本。正式服务也要能运行 Node.js。如果测试时用的是仅为自己安装的 Node.js，可按上面的 `apt` 安装步骤配置系统版本。脚本需要修改系统配置时会调用 `sudo`。
+
+如果 `.env` 里用了 `https://www.example.com`，下面的参数 `example.com` 会把裸域名跳转到 `www`。换成你自己的根域名。如果主站直接用裸域名，或只配置了 `www` 这一条 DNS，运行 `bash deploy/deploy-linux.sh` 即可。
 
 ```bash
-cd /opt/ecommerce_website
 bash deploy/deploy-linux.sh example.com
 ```
 
@@ -198,7 +229,6 @@ curl -fsS http://127.0.0.1:3000/api/health
 新代码已推送到 GitHub 后，在服务器执行下面的命令。保留原来的 `DB_PATH` 和跳转参数。仅修改 `.env` 时，重新运行最后一条命令即可。
 
 ```bash
-cd /opt/ecommerce_website
 git pull --ff-only
 bash deploy/deploy-linux.sh example.com
 ```
@@ -211,14 +241,14 @@ sudo journalctl -u apex-goods -u caddy -n 100 --no-pager
 
 <a id="manual-linux-deploy"></a>
 
-### 手动部署（需要自己维护服务配置时）
+<details>
+<summary>手动部署（需要自己维护服务配置时）</summary>
 
-完成上面的第 1–5 步后，可以用下面的命令代替第 6 步。用部署脚本时可以跳过本节。
+安装 Caddy、配置域名和 `.env` 后，可用下面的步骤手动配置服务。用部署脚本时可以跳过本节。
 
 1. 创建让 systemd 运行网站的专用账号 `apex-goods`、给它数据库目录和 `.env` 的读取权限，再用当前登录账号安装项目依赖。日常登录服务器仍使用原来的 SSH 账号。
 
    ```sh
-   cd /opt/ecommerce_website
    id -u apex-goods >/dev/null 2>&1 || \
      sudo useradd --system --user-group --home-dir /var/lib/apex-goods --shell /usr/sbin/nologin apex-goods
    sudo install -d -o apex-goods -g apex-goods -m 0700 /var/lib/apex-goods
@@ -227,7 +257,7 @@ sudo journalctl -u apex-goods -u caddy -n 100 --no-pager
    npm ci --omit=dev --ignore-scripts
    ```
 
-2. 运行 `sudo nano /etc/systemd/system/apex-goods.service`，粘贴下面的内容并保存。用 `command -v node` 确认 Node 的路径。如果路径与示例不同，将 `ExecStart` 的 `/usr/bin/node` 改成服务器上实际可执行的路径。
+2. 运行 `sudo nano /etc/systemd/system/apex-goods.service`，粘贴下面的内容并保存。把 `WorkingDirectory` 和 `ExecStart` 中的 `/opt/ecommerce_website` 换成你的实际项目路径。用 `command -v node` 确认 `/usr/bin/node` 是否与你的 Node 路径一致。
 
    ```ini
    [Unit]
@@ -279,6 +309,8 @@ sudo journalctl -u apex-goods -u caddy -n 100 --no-pager
 
 使用 Cloudflare 时，按 [域名接入步骤](#cloudflare-domain) 配置 HTTPS 和访客 IP。手动部署后更新代码，在项目目录重新执行 `npm ci --omit=dev --ignore-scripts`，再执行 `sudo systemctl restart apex-goods`。
 
+</details>
+
 ## Docker Compose 部署（可选）
 
 服务器已经装有 Docker 时，可以让 Compose 安装 Node 依赖并管理应用进程。使用同一份 `.env`，至少填写 `APP_ORIGIN` 和 `ADMIN_PASSWORD`，然后执行：
@@ -290,7 +322,7 @@ docker compose logs --tail=100 web
 curl -fsS http://127.0.0.1:3000/api/health
 ```
 
-默认 `docker-compose.yml` 将 Web 端口绑定在主机的 `127.0.0.1:3000`，可用 [手动部署中的第 3 步](#manual-linux-deploy) 配置主机上的 Caddy。容器将数据库保存在 `ecommerce_data` 卷内。修改 `.env` 后执行 `docker compose up -d --force-recreate web`，让容器读取新配置。更新代码用 `docker compose up -d --build`。
+默认 `docker-compose.yml` 将 Web 端口绑定在主机的 `127.0.0.1:3000`，可展开 [手动部署](#manual-linux-deploy)，按第 3 步配置主机上的 Caddy。容器将数据库保存在 `ecommerce_data` 卷内。修改 `.env` 后执行 `docker compose up -d --force-recreate web`，让容器读取新配置。更新代码用 `docker compose up -d --build`。
 
 如果已经使用 `docker-compose.prod.yml`，继续在命令中加 `-f docker-compose.prod.yml`，沿用原来的数据库卷和 Nginx。该文件里的 Nginx HTTPS 示例需要填入正式域名和证书路径。切换 Compose 文件会切换数据库卷，迁移前先备份。重启或更新时请保留数据库卷。
 
@@ -319,7 +351,7 @@ curl -fsS http://127.0.0.1:3000/api/health
 
 在 `.env` 中将 `APP_ORIGIN` 设为正式地址 `https://www.example.com`，并保留 `TRUST_PROXY=true`。登录和询盘提交都会校验请求来源，因此主地址要与 `APP_ORIGIN` 完全一致。首次部署时，DNS 验证通过后回到部署教程启动网站。已有服务改了 `.env` 时按原部署方式重新加载。
 
-如果运行部署脚本时传了 `example.com`，它会配置根域名跳转。手动配置 Caddy 时，参考 [手动部署中的第 3 步](#manual-linux-deploy) 配置主站和跳转。
+如果运行部署脚本时传了 `example.com`，它会配置根域名跳转。手动配置 Caddy 时，展开 [手动部署](#manual-linux-deploy)，按第 3 步配置主站和跳转。
 
 ### 3. 配置访客 IP 和 HTTPS 代理
 
@@ -370,6 +402,15 @@ curl -sSI https://example.com/
   Docker 部署时，将上面的 `sudo -u apex-goods node` 换成 `docker compose exec -T web node`，并使用部署时的 Compose 文件。重置会撤销全部管理员会话。
 
 ### 上线安全设置
+
+<details>
+<summary>Ubuntu 20.04 怎样继续获取系统安全更新？</summary>
+
+Ubuntu 20.04 已结束常规安全维护。继续用这版系统对外运行网站时，可通过 Ubuntu Pro 的扩展安全维护（ESM）获取系统补丁。先运行 `pro status`。若找不到 `pro`，运行 `sudo apt update` 和 `sudo apt install ubuntu-advantage-tools`。
+
+若显示尚未绑定，运行 `sudo pro attach`，在浏览器打开终端给出的网址，按提示绑定。再用 `pro status` 检查 `esm-infra` 和 `esm-apps`。对尚未启用的项目，分别运行 `sudo pro enable esm-infra` 或 `sudo pro enable esm-apps`。最后运行 `sudo apt update` 和 `sudo apt upgrade` 安装更新。[Ubuntu 20.04 支持周期](https://ubuntu.com/project/docs/release-team/list-of-releases/#expanded-security-maintenance) · [Ubuntu Pro 绑定步骤](https://ubuntu.com/pro-client/docs/en/docs/tutorials/basic_commands/)
+
+</details>
 
 1. **限制公网端口。** 在云安全组和服务器防火墙，只放行网站用的 `80/tcp`、`443/tcp`，以及从运维 IP 或 VPN 网段访问的 SSH。应用端口默认是 `3000`，绑定在 `127.0.0.1`。SSH 使用密钥和普通账号，确认另一条 SSH 会话能用密钥登录后，再关闭密码登录和 root 远程登录。[Ubuntu OpenSSH 配置](https://ubuntu.com/server/docs/how-to/security/openssh-server/)
 2. **保护后台和账户。** 网站后台使用独立的强密码。为云平台、域名注册商和 Cloudflare 账户开启多因素认证。后台只供团队使用时，可用 Cloudflare Access 同时保护 `/admin.html` 和 `/api/admin/*`，只允许团队身份登录，并给身份提供商开启 MFA。[Cloudflare Access 路径设置](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/) · [Cloudflare 双重认证](https://developers.cloudflare.com/fundamentals/user-profiles/2fa/)
