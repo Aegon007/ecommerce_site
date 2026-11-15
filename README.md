@@ -385,6 +385,12 @@ curl -sSI https://example.com/
 - 用正式域名打开 `/admin.html` 登录。到 `/contact.html` 提交一条测试询盘，确认后台能查到，业务邮箱也收到通知。自定义 Cloudflare 缓存规则时，避开 `/admin.html` 和 `/api/*`。
 - **522** 时检查 DNS 指向的公网 IP、Caddy 或 Nginx 进程，以及防火墙是否允许 Cloudflare 连接服务器。**526** 时检查源站证书是否过期、是否覆盖访问的域名，以及证书链是否完整。[Cloudflare 522 排查](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-522/) · [Cloudflare 526 排查](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-526/)
 
+## 更换商品图片
+
+在 `/admin.html` 登录后，进入 **Product catalog**，新增商品或点击要更换图片的商品旁的 **Edit**。在 **Product image** 选取电脑里的照片，用缩放、水平和垂直滑块调整取景，确认预览后保存商品。点击 **Clear selection** 可撤销这次选图。
+
+支持 JPG、PNG 和 WebP，单个原图最多 10 MB，至少 400 × 320 像素，每边最多 6,000 像素且总像素最多 2,400 万。封面按 5:4 裁剪，保存为 1,000 × 800 的 WebP。已有图片会显示在编辑框中，修改其他商品字段时可以直接保存。上传的图片随 SQLite 数据库一起备份。
+
 ## 管理员账号和安全
 
 - 默认账号是 `admin`。新建开发数据库时可以用 `123`；生产模式会拒绝这个默认密码。`ADMIN_PASSWORD` 仅用于新数据库初始化，已有密码保存在数据库里。

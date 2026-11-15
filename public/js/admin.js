@@ -515,7 +515,7 @@ function openEditProductModal(productId) {
   form.elements.namedItem('price').value = product.price;
   form.elements.namedItem('compare_at_price').value = product.compare_at_price || '';
   form.elements.namedItem('stock').value = product.stock;
-  form.elements.namedItem('image_url').value = product.image_url;
+  productImageEditors.get(form).reset(product.image_url);
   form.elements.namedItem('description').value = product.description;
   form.elements.namedItem('is_featured').checked = Boolean(product.is_featured);
 
@@ -526,33 +526,7 @@ function openEditProductModal(productId) {
 function closeEditProductModal() {
   const modal = document.getElementById('edit-product-modal');
   if (modal) modal.classList.remove('active');
-}
-
-async function handleEditProduct(e) {
-  if (e) e.preventDefault();
-  const form = e.target;
-  const prodId = form.elements.namedItem('productId').value;
-
-  const payload = {
-    name: form.elements.namedItem('name').value,
-    category: form.elements.namedItem('category').value,
-    price: parseFloat(form.elements.namedItem('price').value),
-    compare_at_price: form.elements.namedItem('compare_at_price').value ? parseFloat(form.elements.namedItem('compare_at_price').value) : null,
-    stock: parseInt(form.elements.namedItem('stock').value, 10),
-    description: form.elements.namedItem('description').value,
-    image_url: form.elements.namedItem('image_url').value,
-    is_featured: form.elements.namedItem('is_featured').checked
-  };
-
-  try {
-    await API.put(`/api/admin/products/${prodId}`, payload);
-    showToast(`Product "${payload.name}" updated successfully!`, 'success');
-    closeEditProductModal();
-    await loadAdminProducts();
-    await loadMetrics();
-  } catch (err) {
-    showToast(err.message || 'Failed to update product', 'error');
-  }
+  productImageEditors.get(document.getElementById('edit-product-form')).reset('');
 }
 
 function openAddProductModal() {
@@ -563,11 +537,17 @@ function openAddProductModal() {
 function closeAddProductModal() {
   const modal = document.getElementById('add-product-modal');
   if (modal) modal.classList.remove('active');
+  productImageEditors.get(document.getElementById('add-product-form')).reset('');
 }
 
-async function handleAddProduct(e) {
-  if (e) e.preventDefault();
-  const form = e.target;
+async function handleProductSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const productId = form.elements.namedItem('productId')?.value;
+  const submit = form.querySelector('button[type=submit]');
+  if (submit.disabled) return;
+  const editor = productImageEditors.get(form);
+  const closeButtons = form.closest('.modal-dialog').querySelectorAll('[data-close-product-modal]');
   const payload = {
     name: form.elements.namedItem('name').value,
     category: form.elements.namedItem('category').value,
@@ -575,20 +555,33 @@ async function handleAddProduct(e) {
     compare_at_price: form.elements.namedItem('compare_at_price').value ? parseFloat(form.elements.namedItem('compare_at_price').value) : null,
     stock: parseInt(form.elements.namedItem('stock').value, 10),
     description: form.elements.namedItem('description').value,
-    image_url: form.elements.namedItem('image_url').value,
     is_featured: form.elements.namedItem('is_featured').checked
   };
 
+  submit.disabled = editor.fieldset.disabled = true;
+  for (const button of closeButtons) button.disabled = true;
   try {
-    await API.post('/api/admin/products', payload);
-    showToast(`Product "${payload.name}" added to database!`, 'success');
-    closeAddProductModal();
-    form.reset();
+    const image = await editor.encode();
+    if (image) payload.image_jpeg = image;
+    else if (!productId) payload.image_url = '/images/product-placeholder.svg';
+
+    if (productId) {
+      await API.put(`/api/admin/products/${productId}`, payload);
+      closeEditProductModal();
+    } else {
+      await API.post('/api/admin/products', payload);
+      closeAddProductModal();
+      form.reset();
+    }
+    showToast(`Product "${payload.name}" ${productId ? 'updated' : 'added'}.`, 'success');
     await loadAdminProducts();
     await loadMetrics();
-    await loadDatabaseInfo();
+    if (!productId) await loadDatabaseInfo();
   } catch (err) {
-    showToast(err.message || 'Failed to add product', 'error');
+    showToast(err.message || 'Failed to save product', 'error');
+  } finally {
+    submit.disabled = editor.fieldset.disabled = false;
+    for (const button of closeButtons) button.disabled = false;
   }
 }
 
@@ -626,8 +619,12 @@ document.getElementById('cancel-password-change').addEventListener('click', clos
 document.getElementById('change-password-modal').addEventListener('close', () => document.getElementById('change-password-form').reset());
 document.getElementById('change-password-form').addEventListener('submit', handleChangePassword);
 document.getElementById('open-add-product').addEventListener('click', openAddProductModal);
-document.getElementById('add-product-form').addEventListener('submit', handleAddProduct);
-document.getElementById('edit-product-form').addEventListener('submit', handleEditProduct);
+const productImageEditors = new Map();
+for (const id of ['add-product-form', 'edit-product-form']) {
+  const form = document.getElementById(id);
+  productImageEditors.set(form, createProductImageEditor(form));
+  form.addEventListener('submit', handleProductSubmit);
+}
 document.querySelectorAll('[data-close-product-modal="add"]').forEach(button => button.addEventListener('click', closeAddProductModal));
 document.querySelectorAll('[data-close-product-modal="edit"]').forEach(button => button.addEventListener('click', closeEditProductModal));
 document.querySelectorAll('.catalog-filter-btn').forEach(button => button.addEventListener('click', () => setCatalogFilter(button.dataset.filter)));

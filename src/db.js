@@ -106,6 +106,11 @@ function initSchema() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS product_images (
+      hash TEXT PRIMARY KEY,
+      content BLOB NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS coupons (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT NOT NULL UNIQUE,

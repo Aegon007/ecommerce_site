@@ -144,10 +144,11 @@ function formatMoney(amount) {
 function escapeHTML(value) {
   return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 }
-function safeImageURL(value) {
+function imageAssetURL(value) {
   const url = String(value || '');
-  return /^https?:\/\/[^\s]+$/i.test(url) || /^\/(?!\/)[^\s]*$/.test(url) ? escapeHTML(url) : '/images/product-placeholder.svg';
+  return /^https?:\/\/[^\s]+$/i.test(url) || /^\/(?!\/)[^\s]*$/.test(url) ? url : '/images/product-placeholder.svg';
 }
+function safeImageURL(value) { return escapeHTML(imageAssetURL(value)); }
 document.addEventListener('error', event => {
   if (event.target instanceof HTMLImageElement && !event.target.src.endsWith('/images/product-placeholder.svg')) {
     event.target.src = '/images/product-placeholder.svg';

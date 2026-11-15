@@ -448,10 +448,7 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Product Image URL *</label>
-          <input type="url" name="image_url" class="form-control" required placeholder="https://images.unsplash.com/..." value="https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=800&q=80" />
-        </div>
+        <div data-product-image></div>
 
         <div class="form-group">
           <label class="form-label">Description</label>
@@ -515,10 +512,7 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Product Image URL *</label>
-          <input type="url" name="image_url" class="form-control" required />
-        </div>
+        <div data-product-image></div>
 
         <div class="form-group">
           <label class="form-label">Description</label>
@@ -538,6 +532,32 @@
     </div>
   </div>
 
+  <template id="product-image-template">
+    <fieldset class="product-image-editor form-group">
+      <legend class="form-label">Product image</legend>
+      <div class="product-image-current" data-current hidden>
+        <img width="90" height="72" alt="Current product image" />
+        <span>Current image</span>
+      </div>
+      <label class="product-image-picker">
+        <span>Choose a photo</span>
+        <input type="file" class="form-control" accept="image/jpeg,image/png,image/webp" />
+      </label>
+      <p class="product-image-hint" data-requirements>JPG, PNG or WebP · up to 10 MB · at least 400 × 320 px<br />Up to 6,000 px per side and 24 megapixels</p>
+      <div class="product-image-crop" data-crop hidden>
+        <canvas width="500" height="400" role="img" aria-label="5:4 crop preview"></canvas>
+        <div class="product-image-adjustments">
+          <p class="product-image-hint">Crop preview · saves at 1,000 × 800 px</p>
+          <label>Zoom<input type="range" data-zoom min="1" max="3" value="1" step="0.01" /></label>
+          <label>Horizontal position<input type="range" data-horizontal min="0" max="100" value="50" /></label>
+          <label>Vertical position<input type="range" data-vertical min="0" max="100" value="50" /></label>
+        </div>
+      </div>
+      <p class="product-image-status" data-image-status role="status"></p>
+      <button type="button" class="btn btn-secondary product-image-clear" data-clear hidden>Clear selection</button>
+    </fieldset>
+  </template>
+
   <!-- Footer -->
   <footer class="footer">
     <div class="container footer-bottom" style="border: none; padding-top: 0;">
@@ -546,8 +566,9 @@
     </div>
   </footer>
 
-  <script src="/js/api.js?v=auth_v4"></script>
+  <script src="/js/api.js?v=product_images"></script>
   <script src="/js/admin-inquiries.js"></script>
-  <script src="/js/admin.js?v=auth_v4"></script>
+  <script src="/js/product-image-editor.js"></script>
+  <script src="/js/admin.js?v=product_images"></script>
 </body>
 </html>

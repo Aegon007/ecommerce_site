@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const sharp = require('sharp');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-regression-'));
 process.env.DB_PATH = path.join(directory, 'test.db');
 process.env.NODE_ENV = 'test';
@@ -39,6 +40,48 @@ async function request(endpoint, method = 'GET', body, admin = false, headers = 
   return { status: response.status, data: await response.json(), headers: response.headers };
 }
 const order = items => ({ customer: { name: '<img src=x onerror=alert(1)>', email: 'buyer@example.com' }, shipping: { address: '1 Test Street', city: 'Testville', state: 'IL', postal_code: '60000', country: 'United States' }, items });
+
+test('uploaded product images are validated, persisted and replaced with the product', async () => {
+  const jpeg = async (background, width = 1000) => (await sharp({ create: { width, height: 800, channels: 3, background } })
+    .jpeg().toBuffer()).toString('base64');
+  const fields = { name: 'Product with a photo', category: 'Audio & Sound', price: 30, stock: 2 };
+  const image_jpeg = await jpeg('#da6028');
+  assert.equal((await request('/api/admin/products', 'POST', { ...fields, image_jpeg })).status, 401);
+  assert.equal((await request('/api/admin/products', 'POST', { ...fields, image_jpeg }, true, { Origin: 'https://other.example' })).status, 403);
+  const created = await request('/api/admin/products', 'POST', { ...fields, image_jpeg }, true);
+  assert.equal(created.status, 201);
+  const route = `/api/admin/products/${created.data.id}`;
+  const publicRoute = `/api/products/${created.data.slug}`;
+  const oldImage = (await request(publicRoute)).data.product.image_url;
+  assert.match(oldImage, /^\/product-images\/[a-f0-9]{64}\.webp$/);
+  const response = await fetch(base + oldImage);
+  assert.equal(response.headers.get('content-type'), 'image/webp');
+  const normalized = await sharp(Buffer.from(await response.arrayBuffer())).metadata();
+  assert.deepEqual([normalized.format, normalized.width, normalized.height], ['webp', 1000, 800]);
+  const head = await fetch(base + oldImage, { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal((await head.arrayBuffer()).byteLength, 0);
+
+  for (const invalid of [Buffer.from('<svg/>').toString('base64'), await jpeg('#da6028', 999), image_jpeg.slice(0, 1000)]) {
+    assert.equal((await request(route, 'PUT', { image_jpeg: invalid }, true)).status, 400);
+  }
+  assert.equal((await request(route, 'PUT', { image_jpeg: Buffer.alloc(700 * 1024 + 1).toString('base64') }, true)).status, 413);
+  assert.equal((await request(route, 'PUT', { name: 'Edited product' }, true)).data.product.image_url, oldImage);
+
+  const shared = await request('/api/admin/products', 'POST', { ...fields, image_url: oldImage }, true);
+  assert.equal(shared.status, 201);
+  const replacement = await request(route, 'PUT', { image_jpeg: await jpeg('#486538') }, true);
+  assert.equal(replacement.status, 200);
+  const newImage = replacement.data.product.image_url;
+  assert.notEqual(newImage, oldImage);
+  assert.deepEqual(replacement.data.product.gallery, [newImage]);
+  assert.equal((await fetch(base + oldImage)).status, 200);
+  assert.equal((await request(`/api/admin/products/${shared.data.id}`, 'DELETE', undefined, true)).status, 200);
+  assert.equal((await fetch(base + oldImage)).status, 404);
+  assert.equal((await fetch(base + newImage)).status, 200);
+  assert.equal((await request(route, 'DELETE', undefined, true)).status, 200);
+  assert.equal((await fetch(base + newImage)).status, 404);
+});
 
 test('public catalog hides off-shelf products in listings, details, and related items', async () => {
   await request(`/api/admin/products/${product.id}/toggle-shelf`, 'POST', {}, true);

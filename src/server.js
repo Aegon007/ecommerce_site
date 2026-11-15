@@ -9,6 +9,7 @@ const { HttpError, assert, text, getCoupon, priceTotals, calculateQuote, createO
 const { seedData } = require('./seed');
 const { saveInquiry, sendInquiryNotification, listInquiries, updateInquiryStatus } = require('./inquiries');
 const { getAdminSession, sessionCookie, signIn, changeAdminPassword } = require('./admin-auth');
+const { PRODUCT_BODY_LIMIT, IMAGE_PATH, PLACEHOLDER, prepareProductImage, saveProductImage, releaseProductImage } = require('./product-images');
 
 if (process.env.SEED_DEMO_DATA === 'true' || (process.env.NODE_ENV !== 'production' && process.env.SEED_DEMO_DATA !== 'false')) seedData();
 const PUBLIC_DIR = fs.realpathSync(path.resolve(__dirname, '..', 'public'));
@@ -25,20 +26,23 @@ function sendJson(res, status, data, headers = {}) {
   res.writeHead(status, { ...securityHeaders, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
   res.end(JSON.stringify(data));
 }
-function parseJsonBody(req) {
+function parseJsonBody(req, maxBytes = 64 * 1024) {
   return new Promise((resolve, reject) => {
     if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) {
       req.resume(); reject(new HttpError(415, 'Content-Type must be application/json')); return;
+    }
+    if (Number(req.headers['content-length']) > maxBytes) {
+      req.resume(); reject(new HttpError(413, 'Request body too large')); return;
     }
     let size = 0;
     const chunks = [];
     req.on('data', chunk => {
       size += chunk.length;
-      if (size > 64 * 1024) { reject(new HttpError(413, 'Request body too large')); return; }
+      if (size > maxBytes) { reject(new HttpError(413, 'Request body too large')); return; }
       chunks.push(chunk);
     });
     req.on('end', () => {
-      if (size > 64 * 1024) return;
+      if (size > maxBytes) return;
       try {
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
         assert(body && typeof body === 'object' && !Array.isArray(body), 'JSON body must be an object');
@@ -75,6 +79,29 @@ function productView(p, admin = false) {
 function orderView(order) {
   const { items_json, lookup_token, checkout_key, request_hash, notes, ...receipt } = order;
   return { ...receipt, items: JSON.parse(items_json || '[]') };
+}
+
+async function readProductRequest(req, partial = false) {
+  const body = await parseJsonBody(req, PRODUCT_BODY_LIMIT);
+  if (body.image_jpeg === undefined) return { product: validateProduct(body, partial) };
+  assert(body.image_url === undefined, 'Choose one product image');
+  const product = validateProduct({ ...body, image_url: PLACEHOLDER }, partial);
+  rateLimit(req, 'product-image', 20);
+  const image = await prepareProductImage(body.image_jpeg);
+  product.image_url = image.url;
+  return { product, image };
+}
+
+function productTransaction(write) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = write();
+    db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -245,26 +272,43 @@ const server = http.createServer(async (req, res) => {
       }
       const adminProductMatch = pathname.match(/^\/api\/admin\/products\/(\d+)$/);
       if (adminProductMatch && method === 'DELETE') {
-        const result = run('DELETE FROM products WHERE id = ?', [Number(adminProductMatch[1])]);
-        assert(result.changes, 'Product not found', 404);
+        const id = Number(adminProductMatch[1]);
+        productTransaction(() => {
+          const current = queryOne('SELECT image_url FROM products WHERE id = ?', [id]);
+          assert(current, 'Product not found', 404);
+          run('DELETE FROM products WHERE id = ?', [id]);
+          releaseProductImage(current.image_url);
+        });
         return sendJson(res, 200, { success: true, message: 'Product deleted from catalog.' });
       }
       if (pathname === '/api/admin/products' && method === 'POST') {
-        const product = validateProduct(await parseJsonBody(req));
+        const { product, image } = await readProductRequest(req);
         const slug = (product.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'product') + '-' + crypto.randomBytes(4).toString('hex');
-        const result = run(`INSERT INTO products (name, slug, category, price, compare_at_price, stock, description, image_url, gallery_json, is_featured) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [product.name, slug, product.category, product.price, product.compare_at_price, product.stock, product.description, product.image_url, JSON.stringify([product.image_url]), product.is_featured || 0]);
+        const result = productTransaction(() => {
+          saveProductImage(product.image_url, image);
+          return run(`INSERT INTO products (name, slug, category, price, compare_at_price, stock, description, image_url, gallery_json, is_featured) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [product.name, slug, product.category, product.price, product.compare_at_price, product.stock, product.description, product.image_url, JSON.stringify([product.image_url]), product.is_featured || 0]);
+        });
         return sendJson(res, 201, { success: true, id: Number(result.lastInsertRowid), slug });
       }
       if (adminProductMatch && method === 'PUT') {
         const id = Number(adminProductMatch[1]);
-        const current = queryOne('SELECT * FROM products WHERE id = ?', [id]);
-        assert(current, 'Product not found', 404);
-        const product = validateProduct(await parseJsonBody(req), true);
-        if (product.image_url !== undefined && product.image_url !== current.image_url) product.gallery_json = JSON.stringify([product.image_url, ...JSON.parse(current.gallery_json || '[]').filter(image => image !== current.image_url && image !== product.image_url)]);
-        const columns = PRODUCT_UPDATE_COLUMNS.filter(column => Object.hasOwn(product, column));
-        run(`UPDATE products SET ${columns.map(column => `${column} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          [...columns.map(column => product[column]), id]);
-        return sendJson(res, 200, { product: productView(queryOne('SELECT * FROM products WHERE id = ?', [id]), true) });
+        const { product, image } = await readProductRequest(req, true);
+        const updated = productTransaction(() => {
+          const current = queryOne('SELECT image_url, gallery_json FROM products WHERE id = ?', [id]);
+          assert(current, 'Product not found', 404);
+          const imageChanged = product.image_url !== undefined && product.image_url !== current.image_url;
+          saveProductImage(product.image_url, image);
+          if (imageChanged) {
+            const gallery = JSON.parse(current.gallery_json || '[]').filter(url => url !== current.image_url && url !== product.image_url);
+            product.gallery_json = JSON.stringify([product.image_url, ...gallery]);
+          }
+          const columns = PRODUCT_UPDATE_COLUMNS.filter(column => Object.hasOwn(product, column));
+          run(`UPDATE products SET ${columns.map(column => `${column} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [...columns.map(column => product[column]), id]);
+          if (imageChanged) releaseProductImage(current.image_url);
+          return queryOne('SELECT * FROM products WHERE id = ?', [id]);
+        });
+        return sendJson(res, 200, { product: productView(updated, true) });
       }
       const updateOrderMatch = pathname.match(/^\/api\/admin\/orders\/(\d+)$/);
       if (updateOrderMatch && method === 'PATCH') {
@@ -296,6 +340,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (pathname.startsWith('/api/')) throw new HttpError(404, 'API endpoint not found');
     assert(method === 'GET' || method === 'HEAD', 'Method not allowed', 405);
+    const imageMatch = pathname.match(IMAGE_PATH);
+    if (imageMatch) {
+      const image = queryOne('SELECT content FROM product_images WHERE hash = ?', [imageMatch[1]]);
+      assert(image, 'Product image not found', 404);
+      res.writeHead(200, { ...securityHeaders, 'Content-Type': 'image/webp', 'Content-Length': image.content.length, 'Cache-Control': 'public, max-age=3600' });
+      return res.end(method === 'HEAD' ? undefined : image.content);
+    }
     let decoded;
     try { decoded = decodeURIComponent(pathname); } catch { throw new HttpError(400, 'Invalid URL'); }
     assert(!decoded.includes('\0') && !decoded.includes('\\'), 'Invalid path');
